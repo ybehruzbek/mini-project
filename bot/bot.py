@@ -9,6 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
+import math
 from dotenv import load_dotenv
 from database import init_db, save_user_data, add_default_dhikr, get_user, DB_PATH
 
@@ -183,6 +184,24 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
 # --- Zikrlarni boshqarish qismi ---
 # ==========================================
 
+def get_completion_msg(title, daily_tgt, global_tgt):
+    if daily_tgt <= 0:
+        return f"✅ Maqsad saqlandi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta"
+    
+    days = math.ceil(global_tgt / daily_tgt)
+    months = ""
+    if days > 30:
+        m = days // 30
+        d = days % 30
+        months = f" (taxminan {m} oy-u {d} kun)"
+        
+    return (
+        f"✅ Maqsad muvaffaqiyatli saqlandi!\n\n"
+        f"Siz **{title}** zikrini kuniga **{daily_tgt} marta** va umumiy **{global_tgt} marta** aytishni tanladingiz.\n\n"
+        f"Agar siz uni har kuni {daily_tgt} martadan aytsangiz, {global_tgt} talik ulug' maqsadga **{days} kun{months}** ichida to'liq aytib bo'lar ekansiz inshaalloh. 🤲\n\n"
+        f"Bot sizga har kuni mos vaqtlarda qulay eslatmalar berib turadi! 🌿"
+    )
+
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
     conn = sqlite3.connect(DB_PATH)
@@ -278,7 +297,7 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
                 
         await state.clear()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
-        await callback.message.edit_text(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta", reply_markup=keyboard)
+        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
 
 
 @dp.message(StateFilter(CustomDhikr.global_target))
@@ -303,7 +322,7 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
     ])
-    await message.answer(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta", reply_markup=keyboard)
+    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
 
 
 # --- 2. Zikrni Tahrirlash FSM ---
@@ -371,7 +390,15 @@ async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMConte
                 
         await state.clear()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
-        await callback.message.edit_text("✅ Zikr maqsadi muvaffaqiyatli yangilandi!", reply_markup=keyboard)
+        
+        # We need the title to show the completion message.
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
+        title = cursor.fetchone()[0]
+        conn.close()
+        
+        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
 
 
 @dp.message(StateFilter(EditDhikr.global_target))
@@ -388,6 +415,8 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
+    cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
+    title = cursor.fetchone()[0]
     conn.commit()
     conn.close()
             
@@ -396,7 +425,7 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
     ])
-    await message.answer("✅ Zikr maqsadi muvaffaqiyatli yangilandi!", reply_markup=keyboard)
+    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "settings")
 async def settings_handler(callback: types.CallbackQuery):
