@@ -28,7 +28,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Vaqtincha Web App URL
-WEB_APP_URL = "https://your-vercel-app-url.vercel.app/"
+WEB_APP_URL = "https://qalb-taskini-miniapp.vercel.app/"
 
 # Anketa holatlari (States)
 class Onboarding(StatesGroup):
