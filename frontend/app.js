@@ -193,7 +193,6 @@ async function fetchStats() {
         .order('date', { ascending: false })
         .limit(5);
         
-    const pList = document.getElementById('progress-list');
     if (progress && progress.length > 0) {
         pList.innerHTML = progress.map(p => `
             <div class="glass-card p-3 flex justify-between items-center text-sm font-medium">
