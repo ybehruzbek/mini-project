@@ -50,7 +50,8 @@ class LogDhikr(StatesGroup):
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+        [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text="🤲 Zikrlarni ko'rish", callback_data="view_dhikrs")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="settings")]
     ])
