@@ -198,9 +198,11 @@ def get_completion_msg(title, daily_tgt, global_tgt):
         
     return (
         f"✅ <b>Maqsad muvaffaqiyatli saqlandi!</b>\n\n"
-        f"<blockquote>Siz <b>{title}</b> zikrini kuniga <b>{daily_tgt}</b> marta va umumiy <b>{global_tgt}</b> marta aytishni tanladingiz.</blockquote>\n\n"
-        f"Agar siz uni har kuni {daily_tgt} martadan aytsangiz, {global_tgt} talik ulug' maqsadga <b>{days} kun{months}</b> ichida to'liq aytib bo'lar ekansiz inshaalloh. 🤲\n\n"
-        f"<i>Bot sizga har kuni mos vaqtlarda qulay eslatmalar berib turadi!</i> 🌿"
+        f"<blockquote>📿 <b>{title}</b></blockquote>\n"
+        f"📅 Kuniga: <b>{daily_tgt:,} marta</b>\n"
+        f"🎯 Jami: <b>{global_tgt:,} marta</b>\n\n"
+        f"Siz har kuni muntazam ravishda aytib borsangiz, <b>{days} kun{months}</b> ichida ushbu zikrni to'liq yakunlagan bo'lasiz inshaalloh! 🤲\n"
+        f"<i>Men sizga belgilangan vaqtlarda eslatib turaman.</i> 🌿"
     )
 
 def get_start_action_keyboard():
