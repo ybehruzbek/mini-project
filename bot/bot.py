@@ -513,6 +513,47 @@ async def send_specific_reminder(user_id, reminder_type):
     except Exception:
         pass
 
+async def send_daily_summary():
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT user_id FROM Users")
+    users = cursor.fetchall()
+    
+    for u in users:
+        user_id = u[0]
+        cursor.execute("SELECT d.title, d.daily_target, IFNULL(dp.current_count, 0) FROM Dhikrs d LEFT JOIN Daily_Progress dp ON d.dhikr_id = dp.dhikr_id AND dp.date = ? WHERE d.user_id = ?", (today, user_id))
+        user_dhikrs = cursor.fetchall()
+        
+        if not user_dhikrs:
+            continue
+            
+        total_done = sum([row[2] for row in user_dhikrs])
+        
+        if total_done == 0:
+            text = "🌙 <b>Kunlik Xulosa</b>\n\nBugun zikr qilishga vaqt topa olmadingiz shekilli. Hechqisi yo'q, ertaga albatta bajaramiz inshaalloh! 🌿\nUyqudan oldin qalbni xotirjam qilib yotishni unutmang."
+        else:
+            text = "🌙 <b>Kunlik Zikr Xulosasi</b>\n\nAlhamdulillah, bugungi kuningizni chiroyli amallar bilan o'tkazdingiz. Sizning bugungi natijalaringiz:\n\n"
+            for title, target, current in user_dhikrs:
+                if current >= target:
+                    text += f"📿 <b>{title}</b>\n▫️ Qilingan: {current} ta ✅ (Maqsadga yetdingiz!)\n\n"
+                elif current > 0:
+                    text += f"📿 <b>{title}</b>\n▫️ Qilingan: {current} ta (Maqsad: {target} ta)\n\n"
+                else:
+                    text += f"📿 <b>{title}</b>\n▫️ Boshlanmadi\n\n"
+            
+            text += "✨ <i>Alloh taolo bugungi barcha zikrlaringizni dargohida qabul qilsin! Ertaga yangi g'ayrat bilan davom etamiz inshaalloh.</i> 🤲"
+            
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")]])
+            
+        try:
+            await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+            
+    conn.close()
+
 @dp.callback_query(F.data.startswith("start_action_"))
 async def start_action_handler(callback: types.CallbackQuery):
     action = callback.data.split("_")[2]
@@ -735,11 +776,15 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
 async def main() -> None:
     init_db()
     
-    # Eslatmalarni jadvalga qo'shish (Vaqtlarni O'zbekiston vaqtiga moslab olish kerak)
+    # Umumiy eslatmalar
     scheduler.add_job(broadcast_reminder, 'cron', hour=8, minute=0, args=["morning"])
     scheduler.add_job(broadcast_reminder, 'cron', hour=13, minute=0, args=["day"])
     scheduler.add_job(broadcast_reminder, 'cron', hour=17, minute=0, args=["afternoon"])
     scheduler.add_job(broadcast_reminder, 'cron', hour=21, minute=0, args=["evening"])
+    
+    # Kunlik xulosa (22:30 da)
+    scheduler.add_job(send_daily_summary, 'cron', hour=22, minute=30)
+    
     scheduler.start()
     
     await bot.delete_webhook(drop_pending_updates=True)
