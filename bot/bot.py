@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from dotenv import load_dotenv
-from database import init_db, save_user_data, add_default_dhikr
+from database import init_db, save_user_data, add_default_dhikr, get_user
 
 # Muhit o'zgaruvchilarini yuklash
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -32,6 +32,23 @@ class Onboarding(StatesGroup):
 
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message, state: FSMContext) -> None:
+    # Eski foydalanuvchi ekanligini tekshiramiz
+    user = get_user(message.from_user.id)
+    if user:
+        name = user[0]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))],
+            [InlineKeyboardButton(text="🤲 Zikrlarni ko'rish", callback_data="view_dhikrs")],
+            [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="settings")]
+        ])
+        await message.answer(
+            f"Assalomu alaykum yana bir bor, hurmatli {name}! 🌙\n\n"
+            "«Qalb Taskini» botiga xush kelibsiz. Zikrlarni davom ettirishingiz mumkin 👇",
+            reply_markup=keyboard
+        )
+        return
+
+    # Yangi foydalanuvchi bo'lsa, anketa boshlanadi
     first_name = message.from_user.first_name
     
     welcome_msg = await message.answer(

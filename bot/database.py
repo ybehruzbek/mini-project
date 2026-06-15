@@ -70,6 +70,14 @@ def save_user_data(user_id, data):
     conn.commit()
     conn.close()
 
+def get_user(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT full_name FROM Users WHERE user_id=?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user
+
 def add_default_dhikr(user_id, habit_level):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
