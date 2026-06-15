@@ -368,6 +368,26 @@
                 </button>
             </div>
 
+            <h3 class="text-sm font-semibold opacity-50 uppercase tracking-widest mb-3 ml-2 mt-2">Shaxsiy Eslatmalar</h3>
+            <div class="glass-card flex flex-col mb-8 overflow-hidden relative">
+                <!-- Loading overlay -->
+                <div id="reminders-loading" class="absolute inset-0 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                    <i class="ph ph-spinner-gap animate-spin text-2xl text-[var(--accent)]"></i>
+                </div>
+                
+                <div id="reminders-list" class="flex flex-col">
+                    <!-- Javascript injects reminders here -->
+                </div>
+                
+                <div class="relative w-full border-t border-[var(--border)] overflow-hidden">
+                    <input type="time" id="reminder-time-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" required>
+                    <button id="add-reminder-btn" class="p-4 flex items-center justify-center gap-2 text-[var(--accent)] active:bg-emerald-50 dark:active:bg-emerald-900/20 transition-colors w-full">
+                        <i class="ph ph-plus-circle text-lg"></i>
+                        <span class="font-medium text-sm">Yangi vaqt qo'shish</span>
+                    </button>
+                </div>
+            </div>
+            
             <h3 class="text-sm font-semibold text-red-500 opacity-80 uppercase tracking-widest mb-3 ml-2">Xavfli Hudud
             </h3>
             <div class="glass-card flex flex-col mb-10 overflow-hidden border border-red-200 dark:border-red-900/30">

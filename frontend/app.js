@@ -124,6 +124,9 @@ async function initApp() {
     // 2. Fetch Dhikrs
     await fetchDhikrs();
     
+    // 3. Fetch Reminders
+    fetchReminders();
+    
     // Ensure smooth premium loading feel
     const elapsed = Date.now() - start;
     if (elapsed < 400) await new Promise(r => setTimeout(r, 400 - elapsed));
@@ -466,6 +469,107 @@ document.getElementById('hard-reset-btn').addEventListener('click', async () => 
         }
     });
 });
+
+// -----------------------------------------------------
+// 5. REMINDERS LOGIC
+// -----------------------------------------------------
+
+async function fetchReminders() {
+    const listEl = document.getElementById('reminders-list');
+    const loadingEl = document.getElementById('reminders-loading');
+    if(!listEl) return;
+    
+    loadingEl.classList.remove('hidden');
+    
+    try {
+        const { data: reminders, error } = await supabaseClient.from('user_reminders')
+            .select('*')
+            .eq('user_id', userId)
+            .order('time', { ascending: true });
+            
+        if (error) throw error;
+        
+        listEl.innerHTML = '';
+        
+        if (reminders && reminders.length > 0) {
+            reminders.forEach(r => {
+                listEl.innerHTML += `
+                    <div class="p-4 flex items-center justify-between border-b border-[var(--border)]">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 flex items-center justify-center">
+                                <i class="ph ph-clock text-lg"></i>
+                            </div>
+                            <span class="font-medium text-lg">${r.time}</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" class="sr-only peer" ${r.is_active ? 'checked' : ''} onchange="toggleReminder(${r.id}, this.checked)">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                            </label>
+                            <button onclick="deleteReminder(${r.id})" class="text-red-400 p-2 rounded-md active:bg-red-50 dark:active:bg-red-900/20 transition-colors">
+                                <i class="ph ph-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            listEl.innerHTML = `<div class="p-6 text-center text-sm opacity-50">Hali hech qanday eslatma qo'shilmagan</div>`;
+        }
+    } catch (e) {
+        console.error(e);
+        listEl.innerHTML = `<div class="p-4 text-center text-sm text-red-500">Xatolik yuz berdi. Iltimos qayta urinib ko'ring.</div>`;
+    } finally {
+        loadingEl.classList.add('hidden');
+    }
+}
+
+async function addReminder(timeStr) {
+    tg.HapticFeedback.impactOccurred('light');
+    document.getElementById('reminders-loading').classList.remove('hidden');
+    try {
+        await supabaseClient.from('user_reminders').insert({
+            user_id: userId,
+            time: timeStr,
+            is_active: true
+        });
+        fetchReminders();
+    } catch(e) {
+        console.error(e);
+        document.getElementById('reminders-loading').classList.add('hidden');
+    }
+}
+
+window.toggleReminder = async function(id, isActive) {
+    tg.HapticFeedback.impactOccurred('light');
+    try {
+        await supabaseClient.from('user_reminders').update({ is_active: isActive }).eq('id', id);
+    } catch(e) {
+        console.error(e);
+        fetchReminders();
+    }
+};
+
+window.deleteReminder = async function(id) {
+    tg.showConfirm("Ushbu eslatmani o'chirib tashlaysizmi?", async (confirmed) => {
+        if (confirmed) {
+            tg.HapticFeedback.impactOccurred('medium');
+            document.getElementById('reminders-loading').classList.remove('hidden');
+            await supabaseClient.from('user_reminders').delete().eq('id', id);
+            fetchReminders();
+        }
+    });
+};
+
+const timeInput = document.getElementById('reminder-time-input');
+if (timeInput) {
+    timeInput.addEventListener('change', (e) => {
+        if (e.target.value) {
+            addReminder(e.target.value);
+            e.target.value = '';
+        }
+    });
+}
 
 // Start
 initApp();

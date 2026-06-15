@@ -29,7 +29,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Vaqtincha Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=4"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=5"
 
 # Anketa holatlari (States)
 class Onboarding(StatesGroup):
@@ -934,6 +934,31 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     # Option to celebrate here too, but doing it simply:
     await message.answer(f"✅ +{amount} ta zikr muvaffaqiyatli qo'shildi!")
 
+async def check_user_reminders():
+    # Get current time in HH:MM format
+    now = datetime.now()
+    current_time_str = now.strftime("%H:%M")
+    
+    try:
+        resp = supabase.table('user_reminders').select('user_id').eq('time', current_time_str).eq('is_active', True).execute()
+        if resp.data:
+            for r in resp.data:
+                user_id = r['user_id']
+                text = (
+                    "🔔 <b>Shaxsiy Eslatma!</b>\n\n"
+                    "Siz belgilagan zikr vaqti bo'ldi. Qalbingizga taskin berish uchun zikr qilishni unutmang! 🤲"
+                )
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+                    [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))]
+                ])
+                try:
+                    await bot.send_message(chat_id=user_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+                except Exception as e:
+                    logging.error(f"Failed to send custom reminder to {user_id}: {e}")
+    except Exception as e:
+        logging.error(f"Error checking user reminders: {e}")
+
 async def main() -> None:
     init_db()
     
@@ -943,13 +968,10 @@ async def main() -> None:
         BotCommand(command="stats", description="Admin statistika (faqat adminlar uchun)")
     ])
     
-    # Umumiy eslatmalar
-    scheduler.add_job(broadcast_reminder, 'cron', hour=8, minute=0, args=["morning"])
-    scheduler.add_job(broadcast_reminder, 'cron', hour=13, minute=0, args=["day"])
-    scheduler.add_job(broadcast_reminder, 'cron', hour=17, minute=0, args=["afternoon"])
-    scheduler.add_job(broadcast_reminder, 'cron', hour=21, minute=0, args=["evening"])
+    # Har daqiqada shaxsiy eslatmalarni tekshirish
+    scheduler.add_job(check_user_reminders, 'cron', minute='*')
     
-    # Kunlik xulosa (22:30 da)
+    # Kunlik xulosa (22:30 da) baribir hammaga ketaversin, bu umumiy report
     scheduler.add_job(send_daily_summary, 'cron', hour=22, minute=30)
     
     scheduler.start()
