@@ -2,91 +2,257 @@
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Qalb Taskini - Tasbeh</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Qalb Taskini</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Phosphor Icons for modern beautiful icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Modern Font: Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        /* Apple uslubidagi shrift */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-        
+        :root {
+            --bg-color: #f8fafc;
+            --text-color: #0f172a;
+            --card-bg: #ffffff;
+            --accent: #10b981; /* Emerald green */
+            --accent-dim: rgba(16, 185, 129, 0.1);
+            --border: #e2e8f0;
+        }
+
+        body.dark-theme {
+            --bg-color: #0f172a;
+            --text-color: #f8fafc;
+            --card-bg: #1e293b;
+            --accent: #34d399;
+            --accent-dim: rgba(52, 211, 153, 0.1);
+            --border: #334155;
+        }
+
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             user-select: none;
             -webkit-user-select: none;
             touch-action: manipulation;
+            overflow: hidden; /* Prevent scrolling on body, allow in tabs */
         }
 
-        /* SVG halqa uchun aylanish animatsiyasi va o'tishlar */
+        /* Views */
+        .view-container {
+            display: none;
+            height: calc(100vh - 80px); /* 80px for bottom nav */
+            overflow-y: auto;
+            animation: fadeIn 0.3s ease;
+        }
+        .view-container.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Apple Fitness Ring */
         .ring-circle {
-            transition: stroke-dashoffset 0.3s ease-out;
+            transition: stroke-dashoffset 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             transform: rotate(-90deg);
             transform-origin: 50% 50%;
         }
 
-        /* Silliq bosilish effekti */
-        .tap-area {
-            transition: transform 0.1s ease-out;
+        /* Tap Effect */
+        .tap-area { transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1); }
+        .tap-area:active { transform: scale(0.94); }
+
+        /* Bottom Nav */
+        .nav-item {
+            color: #64748b;
+            transition: all 0.2s ease;
         }
-        .tap-area:active {
-            transform: scale(0.96);
+        .nav-item.active {
+            color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .nav-item.active i {
+            font-weight: fill;
+        }
+        
+        /* Glassmorphism for Nav */
+        .glass-nav {
+            background: rgba(var(--card-bg-rgb, 255, 255, 255), 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-top: 1px solid var(--border);
+        }
+        body.dark-theme .glass-nav {
+            background: rgba(30, 41, 59, 0.85);
+        }
+
+        /* Glass Cards */
+        .glass-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Skeleton Loading */
+        .skeleton {
+            background: linear-gradient(90deg, var(--border) 25%, var(--bg-color) 50%, var(--border) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
         }
     </style>
 </head>
-<body class="h-screen w-screen flex flex-col items-center justify-between overflow-hidden py-10">
+<body class="h-screen w-screen flex flex-col justify-between">
     
-    <!-- Yuqori qism: Zikr nomi -->
-    <div class="w-full px-6 flex flex-col items-center">
-        <h1 id="dhikr-title" class="text-2xl font-semibold tracking-tight text-center">Astag'firulloh</h1>
-        <p class="text-sm font-medium opacity-50 mt-1">Maqsad: <span id="target-count">100</span></p>
-    </div>
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 relative w-full h-full">
 
-    <!-- Markaziy qism: Apple Fitness Ring -->
-    <div class="flex-1 flex flex-col items-center justify-center w-full relative tap-area" id="tap-area">
-        <!-- SVG Halqa -->
-        <svg class="w-72 h-72 drop-shadow-sm" viewBox="0 0 100 100">
-            <!-- Orqa fon halqasi (och kulrang) -->
-            <circle 
-                cx="50" cy="50" r="44" 
-                fill="none" 
-                stroke="var(--tg-theme-hint-color, #E5E5EA)" 
-                stroke-width="8" 
-                opacity="0.3"
-            />
-            <!-- Asosiy progress halqasi (Apple yashil uslubi) -->
-            <circle 
-                id="progress-ring"
-                class="ring-circle"
-                cx="50" cy="50" r="44" 
-                fill="none" 
-                stroke="#34C759" 
-                stroke-width="8" 
-                stroke-linecap="round"
-                stroke-dasharray="276.46" 
-                stroke-dashoffset="276.46" 
-            />
-        </svg>
+        <!-- =================== TASBEH VIEW =================== -->
+        <div id="view-tasbeh" class="view-container active w-full h-full items-center justify-between py-10">
+            <!-- Header -->
+            <div class="w-full px-8 flex flex-col items-center">
+                <div class="px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide mb-3" style="background: var(--accent-dim); color: var(--accent);">BUGUNGI MAQSAD</div>
+                <h1 id="dhikr-title" class="text-3xl font-bold tracking-tight text-center leading-tight">...</h1>
+                <p class="text-sm font-medium opacity-60 mt-2 flex items-center gap-2">
+                    <i class="ph ph-target"></i> <span id="target-count">--</span> marta
+                </p>
+            </div>
 
-        <!-- Markazdagi raqam -->
-        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span id="counter" class="text-7xl font-light tracking-tighter" style="font-variant-numeric: tabular-nums;">0</span>
+            <!-- Fitness Ring -->
+            <div class="flex-1 flex flex-col items-center justify-center w-full relative tap-area" id="tap-area">
+                <svg class="w-72 h-72 drop-shadow-lg" viewBox="0 0 100 100">
+                    <!-- Background Ring -->
+                    <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6" opacity="0.5"/>
+                    <!-- Progress Ring -->
+                    <circle 
+                        id="progress-ring" class="ring-circle"
+                        cx="50" cy="50" r="44" fill="none" 
+                        stroke="var(--accent)" stroke-width="8" stroke-linecap="round"
+                        stroke-dasharray="276.46" stroke-dashoffset="276.46" 
+                    />
+                </svg>
+                <!-- Counter -->
+                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span id="counter" class="text-7xl font-bold tracking-tighter" style="font-variant-numeric: tabular-nums;">0</span>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="w-full px-10 flex justify-between items-center pb-4">
+                <button id="reset-btn" class="w-14 h-14 flex items-center justify-center rounded-2xl glass-card text-red-500 active:scale-95 transition-transform shadow-sm">
+                    <i class="ph ph-arrow-counter-clockwise text-2xl"></i>
+                </button>
+                <button id="save-btn" class="flex-1 ml-4 h-14 rounded-2xl text-white font-bold text-lg active:scale-95 transition-transform shadow-lg flex items-center justify-center gap-2" style="background: var(--accent);">
+                    <i class="ph ph-check-circle text-xl"></i> Saqlash
+                </button>
+            </div>
         </div>
-    </div>
 
-    <!-- Pastki qism: Tugmalar -->
-    <div class="w-full px-8 flex justify-between items-center pb-4">
-        <!-- Nollash tugmasi (iOS piktogramma uslubida) -->
-        <button id="reset-btn" class="w-12 h-12 flex items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 active:opacity-70 transition-opacity">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+
+        <!-- =================== ZIKRLAR VIEW =================== -->
+        <div id="view-zikrlar" class="view-container w-full h-full px-6 py-8">
+            <h1 class="text-3xl font-bold mb-2">Zikrlar</h1>
+            <p class="text-sm opacity-60 mb-6">O'zingiz o'qimoqchi bo'lgan zikrni tanlang</p>
+            
+            <div id="dhikr-list" class="flex flex-col gap-4 pb-10">
+                <!-- Skeletons will be replaced by JS -->
+                <div class="glass-card p-5 h-24 skeleton"></div>
+                <div class="glass-card p-5 h-24 skeleton"></div>
+            </div>
+        </div>
+
+
+        <!-- =================== STATS VIEW =================== -->
+        <div id="view-stats" class="view-container w-full h-full px-6 py-8">
+            <h1 class="text-3xl font-bold mb-6">Statistika</h1>
+            
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center mb-3" style="background: var(--accent-dim); color: var(--accent);">
+                        <i class="ph ph-calendar-check text-xl"></i>
+                    </div>
+                    <span class="text-sm opacity-60 font-medium">Bugungi</span>
+                    <span id="stat-daily" class="text-2xl font-bold">0</span>
+                </div>
+                <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-blue-500/10 text-blue-500">
+                        <i class="ph ph-globe text-xl"></i>
+                    </div>
+                    <span class="text-sm opacity-60 font-medium">Umumiy</span>
+                    <span id="stat-global" class="text-2xl font-bold">0</span>
+                </div>
+            </div>
+
+            <h3 class="text-lg font-semibold mb-4">Faollik Tarixi</h3>
+            <div id="progress-list" class="flex flex-col gap-3">
+                <div class="glass-card p-4 h-16 skeleton"></div>
+            </div>
+        </div>
+
+
+        <!-- =================== PROFILE VIEW =================== -->
+        <div id="view-profile" class="view-container w-full h-full px-6 py-8">
+            <h1 class="text-3xl font-bold mb-8">Sozlamalar</h1>
+            
+            <div class="glass-card p-6 flex flex-col items-center text-center mb-6">
+                <div class="w-20 h-20 rounded-full flex items-center justify-center text-4xl mb-4 bg-gray-100 dark:bg-gray-800">
+                    👤
+                </div>
+                <h2 id="profile-name" class="text-xl font-bold">...</h2>
+                <p id="profile-habit" class="text-sm opacity-60 mt-1 capitalize">...</p>
+            </div>
+
+            <div class="flex flex-col gap-3">
+                <button onclick="tg.openTelegramLink('https://t.me/qalb_taskini_bot')" class="glass-card p-4 flex items-center justify-between active:scale-[0.98] transition-transform">
+                    <div class="flex items-center gap-3">
+                        <i class="ph ph-robot text-xl" style="color: var(--accent);"></i>
+                        <span class="font-medium">Botga qaytish</span>
+                    </div>
+                    <i class="ph ph-caret-right opacity-40"></i>
+                </button>
+                
+                <button id="hard-reset-btn" class="glass-card p-4 flex items-center justify-between active:scale-[0.98] transition-transform mt-4 border-red-200 dark:border-red-900/30">
+                    <div class="flex items-center gap-3 text-red-500">
+                        <i class="ph ph-warning-circle text-xl"></i>
+                        <span class="font-medium">Barcha ma'lumotlarni o'chirish</span>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav class="glass-nav h-[80px] w-full px-6 flex justify-between items-center pb-safe relative z-50">
+        <button class="nav-item active flex flex-col items-center gap-1 w-16" data-target="view-tasbeh">
+            <i class="ph ph-fingerprint text-2xl"></i>
+            <span class="text-[10px] font-semibold uppercase tracking-wider">Tasbeh</span>
         </button>
-        
-        <!-- Saqlash tugmasi -->
-        <button id="save-btn" class="px-6 py-3 rounded-full bg-[#007AFF] text-white font-semibold text-sm active:bg-blue-600 transition-colors shadow-sm">
-            Saqlash
+        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-zikrlar">
+            <i class="ph ph-list text-2xl"></i>
+            <span class="text-[10px] font-semibold uppercase tracking-wider">Zikrlar</span>
         </button>
-    </div>
+        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-stats">
+            <i class="ph ph-chart-bar text-2xl"></i>
+            <span class="text-[10px] font-semibold uppercase tracking-wider">Statistika</span>
+        </button>
+        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-profile">
+            <i class="ph ph-user text-2xl"></i>
+            <span class="text-[10px] font-semibold uppercase tracking-wider">Profil</span>
+        </button>
+    </nav>
 
     <script src="app.js"></script>
 </body>
