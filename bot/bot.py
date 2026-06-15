@@ -54,54 +54,54 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
     await state.update_data(messages_to_delete=[message.message_id, welcome_msg.message_id, question_msg.message_id])
     await state.set_state(Onboarding.name)
 
-@dp.callback_query(StateFilter(Onboarding.name), F.data == "use_tg_name")
-async def process_name_callback(callback: types.CallbackQuery, state: FSMContext):
+# Yosh so'rash uchun umumiy funksiya (kodni qayta ishlatish uchun)
+async def ask_for_age(target_message, state: FSMContext):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌱 20 yoshgacha", callback_data="age_under20")],
+        [InlineKeyboardButton(text="🌿 21-30 yosh", callback_data="age_21-30")],
+        [InlineKeyboardButton(text="🌳 31-50 yosh", callback_data="age_31-50")],
+        [InlineKeyboardButton(text="🏔 50 yoshdan yuqori", callback_data="age_over50")]
+    ])
+    msg = await target_message.answer("Sizga moslashtirishim uchun, yosh oralig'ingizni belgilang:", reply_markup=keyboard)
+    
     data = await state.get_data()
     messages = data.get('messages_to_delete', [])
-    
-    await state.update_data(full_name=callback.from_user.first_name)
-    
-    # Tugmali xabarni chatdan tozalab yuboramiz
-    await callback.message.delete()
-    
-    msg = await callback.message.answer("Yoshingizni kiriting: (Faqat raqam bilan)")
     messages.append(msg.message_id)
     await state.update_data(messages_to_delete=messages)
     await state.set_state(Onboarding.age)
+
+@dp.callback_query(StateFilter(Onboarding.name), F.data == "use_tg_name")
+async def process_name_callback(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(full_name=callback.from_user.first_name)
+    await callback.message.delete()
+    await ask_for_age(callback.message, state)
 
 @dp.message(StateFilter(Onboarding.name))
 async def process_name_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     messages = data.get('messages_to_delete', [])
     messages.append(message.message_id)
+    await state.update_data(messages_to_delete=messages)
     
     await state.update_data(full_name=message.text)
-    msg = await message.answer("Yoshingizni kiriting: (Faqat raqam bilan)")
-    
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
-    await state.set_state(Onboarding.age)
+    await ask_for_age(message, state)
 
-@dp.message(StateFilter(Onboarding.age))
-async def process_age(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
+@dp.callback_query(StateFilter(Onboarding.age), F.data.startswith("age_"))
+async def process_age(callback: types.CallbackQuery, state: FSMContext):
+    age_group = callback.data.split("_")[1]
+    await state.update_data(age=age_group)
     
-    if not message.text.isdigit():
-        msg = await message.answer("Iltimos, yoshingizni faqat raqamlar yordamida kiriting.")
-        messages.append(msg.message_id)
-        await state.update_data(messages_to_delete=messages)
-        return
-    
-    await state.update_data(age=int(message.text))
+    # Oldingi yosh tugmalarini o'chiramiz
+    await callback.message.delete()
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨 Erkak", callback_data="gender_male"),
          InlineKeyboardButton(text="👩 Ayol", callback_data="gender_female")]
     ])
-    msg = await message.answer("Jinsingizni belgilang:", reply_markup=keyboard)
+    msg = await callback.message.answer("Jinsingizni belgilang:", reply_markup=keyboard)
     
+    data = await state.get_data()
+    messages = data.get('messages_to_delete', [])
     messages.append(msg.message_id)
     await state.update_data(messages_to_delete=messages)
     await state.set_state(Onboarding.gender)
@@ -111,7 +111,6 @@ async def process_gender(callback: types.CallbackQuery, state: FSMContext):
     gender = callback.data.split("_")[1]
     await state.update_data(gender=gender)
     
-    # Oldingi tugmali xabarni o'chiramiz
     await callback.message.delete()
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -136,26 +135,22 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     user_id = callback.from_user.id
     
-    # Bazaga saqlash
     save_user_data(user_id, data)
     add_default_dhikr(user_id, habit)
     
-    # Tugmali xabarni o'chirish
     await callback.message.delete()
     
-    # Oldingi barcha yozishmalarni tozalash (Chatni toza saqlash)
     messages_to_delete = data.get('messages_to_delete', [])
     for msg_id in messages_to_delete:
         try:
             await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
         except Exception:
-            pass # Agar o'chib ketgan bo'lsa xato bermaydi
+            pass
     
     await state.clear()
     
     name = data['full_name']
     
-    # Asosiy menyuni chiqarish
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text="🤲 Zikrlarni ko'rish", callback_data="view_dhikrs")],

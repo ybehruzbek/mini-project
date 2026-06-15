@@ -13,12 +13,12 @@ def init_db():
     cursor.execute("DROP TABLE IF EXISTS Dhikrs")
     cursor.execute("DROP TABLE IF EXISTS Users")
 
-    # Users jadvallari
+    # Users jadvallari (yoshni endi oralig'li TEXT sifatida olamiz)
     cursor.execute("""
         CREATE TABLE Users (
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
-            age INTEGER,
+            age TEXT,
             gender TEXT,
             habit_level TEXT,
             timezone TEXT DEFAULT 'Asia/Tashkent',
