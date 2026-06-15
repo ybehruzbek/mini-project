@@ -114,27 +114,9 @@
             cursor: pointer;
         }
         
-        .nav-item::before {
-            content: '';
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%) scale(0);
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background-color: var(--accent);
-            opacity: 0;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
         .nav-item.active {
             color: var(--accent);
             transform: translateY(-2px);
-        }
-        .nav-item.active::before {
-            transform: translateX(-50%) scale(1);
-            opacity: 1;
         }
         .nav-item.active i {
             font-weight: fill;
