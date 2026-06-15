@@ -29,7 +29,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Vaqtincha Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=6"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=7"
 
 # Anketa holatlari (States)
 class Onboarding(StatesGroup):
