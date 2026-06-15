@@ -6,13 +6,15 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import math
 import random
 from dotenv import load_dotenv
 from database import init_db, save_user_data, add_default_dhikr, get_user, DB_PATH
+
+ADMIN_ID = 1277687464
 
 # Muhit o'zgaruvchilarini yuklash
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -687,6 +689,8 @@ async def select_log_handler(callback: types.CallbackQuery):
     dhikr_id = int(callback.data.split("_")[2])
     await render_log_dhikr(callback, dhikr_id, callback.from_user.id)
 
+
+
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -699,6 +703,41 @@ async def main_menu_handler(callback: types.CallbackQuery, state: FSMContext):
         )
     else:
         await callback.message.edit_text("Botga xush kelibsiz! Iltimos, /start buyrug'ini yuboring.")
+
+@dp.message(Command("stats"))
+async def stats_handler(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+        
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Umumiy foydalanuvchilar
+    cursor.execute("SELECT COUNT(*) FROM Users")
+    total_users = cursor.fetchone()[0]
+    
+    # Bugun faol bo'lganlar (bugun zikr qilganlar)
+    today = datetime.now().strftime("%Y-%m-%d")
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM Daily_Progress WHERE date=?", (today,))
+    active_users = cursor.fetchone()[0]
+    
+    # Foydalanuvchilar ro'yxati
+    cursor.execute("SELECT user_id, full_name, gender, age FROM Users")
+    users = cursor.fetchall()
+    conn.close()
+    
+    text = f"📊 <b>Admin Statistika</b>\n\n"
+    text += f"👥 Umumiy foydalanuvchilar: <b>{total_users} ta</b>\n"
+    text += f"🔥 Bugungi faol foydalanuvchilar: <b>{active_users} ta</b>\n\n"
+    text += "📋 <b>Foydalanuvchilar ro'yxati:</b>\n"
+    
+    for idx, u in enumerate(users, 1):
+        text += f"{idx}. {u[1]} ({u[2]}, {u[3]} yosh)\n"
+        
+    if len(text) > 4000:
+        text = text[:4000] + "\n...va boshqalar."
+        
+    await message.answer(text, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("log_add_"))
 async def log_add_handler(callback: types.CallbackQuery):
@@ -775,6 +814,12 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
 
 async def main() -> None:
     init_db()
+    
+    # Bot komandalarini o'rnatish
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Botni qayta ishga tushirish"),
+        BotCommand(command="stats", description="Admin statistika (faqat adminlar uchun)")
+    ])
     
     # Umumiy eslatmalar
     scheduler.add_job(broadcast_reminder, 'cron', hour=8, minute=0, args=["morning"])
