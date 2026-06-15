@@ -1,104 +1,63 @@
-import sqlite3
 import os
 from datetime import datetime
+from supabase import create_client, Client
+from dotenv import load_dotenv
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "qalb_taskini.db")
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
+
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+
+if not url or not key:
+    raise ValueError("Supabase URL yoki KEY topilmadi. .env faylini tekshiring.")
+
+supabase: Client = create_client(url, key)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Users jadvallari (yoshni endi oralig'li TEXT sifatida olamiz)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Users (
-            user_id INTEGER PRIMARY KEY,
-            full_name TEXT,
-            age TEXT,
-            gender TEXT,
-            habit_level TEXT,
-            timezone TEXT DEFAULT 'Asia/Tashkent',
-            streak_days INTEGER DEFAULT 0,
-            last_active DATE
-        )
-    """)
-
-    # Dhikrs jadvallari
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Dhikrs (
-            dhikr_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            title TEXT NOT NULL,
-            daily_target INTEGER DEFAULT 100,
-            global_target INTEGER DEFAULT 40000,
-            global_progress INTEGER DEFAULT 0,
-            FOREIGN KEY(user_id) REFERENCES Users(user_id)
-        )
-    """)
-
-    # Daily_Progress jadvallari
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Daily_Progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            dhikr_id INTEGER,
-            date DATE,
-            current_count INTEGER DEFAULT 0,
-            FOREIGN KEY(user_id) REFERENCES Users(user_id),
-            FOREIGN KEY(dhikr_id) REFERENCES Dhikrs(dhikr_id),
-            UNIQUE(user_id, dhikr_id, date)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+    # Supabase'da jadvallar SQL orqali yaratiladi, shuning uchun bu yerda hech nima qilmaymiz.
+    pass
 
 def save_user_data(user_id, data):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO Users (user_id, full_name, age, gender, habit_level)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            full_name=excluded.full_name,
-            age=excluded.age,
-            gender=excluded.gender,
-            habit_level=excluded.habit_level
-    """, (user_id, data.get('full_name'), data.get('age'), data.get('gender'), data.get('habit_level')))
-    conn.commit()
-    conn.close()
+    # Upsert foydalanuvchi
+    user_data = {
+        "user_id": user_id,
+        "full_name": data.get('full_name'),
+        "age": data.get('age'),
+        "habit_level": data.get('habit_level')
+    }
+    # gender va timezone, streak_days lar hozircha olib tashlandi, kerak bo'lsa qo'shish mumkin
+    
+    supabase.table("users").upsert(user_data).execute()
 
 def get_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT full_name FROM Users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
+    response = supabase.table("users").select("full_name").eq("user_id", user_id).execute()
+    if response.data and len(response.data) > 0:
+        return (response.data[0]['full_name'],)
+    return None
 
 def add_default_dhikr(user_id, habit_level):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Odatiga qarab kunlik maqsadni belgilaymiz. Yangi boshlovchilar uchun biroz kamroq.
     daily_tgt = 33 if habit_level == 'beginner' else 100
     global_tgt = 40000
     
     dhikrs = [
-        ("Astagʻfirullahil aʼziym va atubi ilayh", daily_tgt, global_tgt),
-        ("Hasbunallohu va ni'mal vakil", daily_tgt, global_tgt),
-        ("Ya Malikul Mulk", daily_tgt, global_tgt)
+        "Astagʻfirullahil aʼziym va atubi ilayh",
+        "Hasbunallohu va ni'mal vakil",
+        "Ya Malikul Mulk"
     ]
     
-    for title, daily, glbl in dhikrs:
-        cursor.execute("""
-            INSERT INTO Dhikrs (user_id, title, daily_target, global_target)
-            SELECT ?, ?, ?, ?
-            WHERE NOT EXISTS (SELECT 1 FROM Dhikrs WHERE user_id=? AND title=?)
-        """, (user_id, title, daily, glbl, user_id, title))
-    
-    conn.commit()
-    conn.close()
+    for title in dhikrs:
+        # Tekshiramiz bormi yoqmi
+        exists = supabase.table("dhikrs").select("id").eq("user_id", user_id).eq("title", title).execute()
+        if not exists.data or len(exists.data) == 0:
+            supabase.table("dhikrs").insert({
+                "user_id": user_id,
+                "title": title,
+                "daily_target": daily_tgt,
+                "global_target": global_tgt,
+                "daily_count": 0,
+                "global_count": 0
+            }).execute()
 
 if __name__ == "__main__":
-    init_db()
-    print("Ma'lumotlar bazasi muvaffaqiyatli yaratildi/yangilandi.")
+    print("Supabase ulanishi tekshirilmoqda...")
+    print(supabase.table("users").select("count", count="exact").execute())
