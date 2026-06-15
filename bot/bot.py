@@ -59,6 +59,7 @@ def get_main_keyboard():
         [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
         [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text="🤲 Zikrlarni ko'rish", callback_data="view_dhikrs")],
+        [InlineKeyboardButton(text="📊 Mening statistikam", callback_data="view_stats")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="settings")]
     ])
 
@@ -234,6 +235,36 @@ def get_start_action_keyboard():
         
     buttons.append([InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@dp.callback_query(F.data == "view_stats")
+async def view_stats_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('date', today).execute()
+    today_total = sum(p['count'] for p in prog_resp.data) if prog_resp.data else 0
+    
+    dhikr_resp = supabase.table('dhikrs').select('title, global_count').eq('user_id', user_id).execute()
+    total_global = sum(d['global_count'] for d in dhikr_resp.data) if dhikr_resp.data else 0
+    
+    favorite = "Yo'q"
+    if dhikr_resp.data:
+        sorted_dhikrs = sorted(dhikr_resp.data, key=lambda x: x['global_count'], reverse=True)
+        if sorted_dhikrs and sorted_dhikrs[0]['global_count'] > 0:
+            favorite = f"{sorted_dhikrs[0]['title']} ({sorted_dhikrs[0]['global_count']} marta)"
+            
+    text = (
+        "📊 <b>Sizning Statistikangiz</b>\n\n"
+        f"🗓 <b>Bugungi natija:</b> {today_total} marta\n"
+        f"🌐 <b>Umumiy o'qilgan:</b> {total_global} marta\n"
+        f"🏆 <b>Sevimli zikringiz:</b> {favorite}\n\n"
+        "<i>Batafsil grafikalar, ketma-ketlik (streak) va qiziqarli ma'lumotlarni ko'rish uchun <b>Web Ilovaga</b> kiring!</i>"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="main_menu")]
+    ]), parse_mode="HTML")
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
