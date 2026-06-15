@@ -41,7 +41,8 @@
         /* Views */
         .view-container {
             display: none;
-            height: calc(100vh - 80px); /* 80px for bottom nav */
+            height: 100vh; 
+            padding-bottom: 110px;
             overflow-y: auto;
             animation: fadeIn 0.3s ease;
         }
@@ -66,28 +67,78 @@
         .tap-area { transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1); }
         .tap-area:active { transform: scale(0.94); }
 
-        /* Bottom Nav */
+        /* Bottom Nav - Floating Pill + Animated Dot */
+        .glass-nav-container {
+            position: fixed;
+            bottom: 24px;
+            left: 0;
+            width: 100%;
+            padding: 0 24px;
+            z-index: 50;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+        }
+
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15);
+            border-radius: 40px;
+            height: 72px;
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 16px;
+            pointer-events: auto;
+        }
+        body.dark-theme .glass-nav {
+            background: rgba(30, 41, 59, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+
         .nav-item {
             color: #64748b;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            width: 64px;
+            cursor: pointer;
         }
+        
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%) scale(0);
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background-color: var(--accent);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
         .nav-item.active {
             color: var(--accent);
             transform: translateY(-2px);
         }
+        .nav-item.active::before {
+            transform: translateX(-50%) scale(1);
+            opacity: 1;
+        }
         .nav-item.active i {
             font-weight: fill;
-        }
-        
-        /* Glassmorphism for Nav */
-        .glass-nav {
-            background: rgba(var(--card-bg-rgb, 255, 255, 255), 0.85);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-top: 1px solid var(--border);
-        }
-        body.dark-theme .glass-nav {
-            background: rgba(30, 41, 59, 0.85);
+            text-shadow: 0 4px 12px var(--accent-dim);
         }
 
         /* Glass Cards */
@@ -231,25 +282,27 @@
 
     </main>
 
-    <!-- BOTTOM NAVIGATION -->
-    <nav class="glass-nav h-[80px] w-full px-6 flex justify-between items-center pb-safe relative z-50">
-        <button class="nav-item active flex flex-col items-center gap-1 w-16" data-target="view-tasbeh">
-            <i class="ph ph-fingerprint text-2xl"></i>
-            <span class="text-[10px] font-semibold uppercase tracking-wider">Tasbeh</span>
-        </button>
-        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-zikrlar">
-            <i class="ph ph-list text-2xl"></i>
-            <span class="text-[10px] font-semibold uppercase tracking-wider">Zikrlar</span>
-        </button>
-        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-stats">
-            <i class="ph ph-chart-bar text-2xl"></i>
-            <span class="text-[10px] font-semibold uppercase tracking-wider">Statistika</span>
-        </button>
-        <button class="nav-item flex flex-col items-center gap-1 w-16" data-target="view-profile">
-            <i class="ph ph-user text-2xl"></i>
-            <span class="text-[10px] font-semibold uppercase tracking-wider">Profil</span>
-        </button>
-    </nav>
+    <!-- BOTTOM NAVIGATION (Floating Pill) -->
+    <div class="glass-nav-container pb-safe">
+        <nav class="glass-nav">
+            <button class="nav-item active" data-target="view-tasbeh">
+                <i class="ph ph-fingerprint text-2xl"></i>
+                <span class="text-[10px] font-semibold uppercase tracking-wider">Tasbeh</span>
+            </button>
+            <button class="nav-item" data-target="view-zikrlar">
+                <i class="ph ph-list text-2xl"></i>
+                <span class="text-[10px] font-semibold uppercase tracking-wider">Zikrlar</span>
+            </button>
+            <button class="nav-item" data-target="view-stats">
+                <i class="ph ph-chart-bar text-2xl"></i>
+                <span class="text-[10px] font-semibold uppercase tracking-wider">Statistika</span>
+            </button>
+            <button class="nav-item" data-target="view-profile">
+                <i class="ph ph-user text-2xl"></i>
+                <span class="text-[10px] font-semibold uppercase tracking-wider">Profil</span>
+            </button>
+        </nav>
+    </div>
 
     <script src="app.js"></script>
 </body>
