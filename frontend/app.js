@@ -13,15 +13,64 @@ let currentDhikr = null;
 let currentCount = 0;
 
 // Theme Logic
+let currentThemeOverride = localStorage.getItem('appTheme') || 'auto';
+
 function applyTheme() {
-    if (tg.colorScheme === 'dark') {
+    if (currentThemeOverride === 'dark') {
         document.body.classList.add('dark-theme');
-    } else {
+    } else if (currentThemeOverride === 'light') {
         document.body.classList.remove('dark-theme');
+    } else {
+        if (tg.colorScheme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
     }
+    updateThemeUI();
 }
+
+function updateThemeUI() {
+    const btnAuto = document.getElementById('theme-auto');
+    const btnLight = document.getElementById('theme-light');
+    const btnDark = document.getElementById('theme-dark');
+    if(!btnAuto) return;
+    
+    [btnAuto, btnLight, btnDark].forEach(btn => {
+        btn.classList.remove('bg-white', 'dark:bg-gray-600', 'text-[var(--accent)]', 'shadow-sm');
+        btn.classList.add('opacity-60');
+    });
+    
+    let activeBtn = btnAuto;
+    if (currentThemeOverride === 'light') activeBtn = btnLight;
+    if (currentThemeOverride === 'dark') activeBtn = btnDark;
+    
+    activeBtn.classList.remove('opacity-60');
+    activeBtn.classList.add('bg-white', 'dark:bg-gray-600', 'text-[var(--accent)]', 'shadow-sm');
+}
+
 tg.onEvent('themeChanged', applyTheme);
-applyTheme();
+
+// Initialize Theme & Haptic Listeners when DOM is ready
+setTimeout(() => {
+    document.getElementById('theme-auto')?.addEventListener('click', () => { currentThemeOverride = 'auto'; localStorage.setItem('appTheme', 'auto'); applyTheme(); });
+    document.getElementById('theme-light')?.addEventListener('click', () => { currentThemeOverride = 'light'; localStorage.setItem('appTheme', 'light'); applyTheme(); });
+    document.getElementById('theme-dark')?.addEventListener('click', () => { currentThemeOverride = 'dark'; localStorage.setItem('appTheme', 'dark'); applyTheme(); });
+    
+    const hToggle = document.getElementById('haptic-toggle');
+    if(hToggle) {
+        hToggle.checked = hapticsEnabled;
+        hToggle.addEventListener('change', (e) => {
+            hapticsEnabled = e.target.checked;
+            localStorage.setItem('hapticsEnabled', hapticsEnabled);
+            if(hapticsEnabled) tg.HapticFeedback.impactOccurred('light');
+        });
+    }
+    applyTheme();
+}, 0);
+
+// Haptics Logic
+let hapticsEnabled = localStorage.getItem('hapticsEnabled') !== 'false';
 
 // -----------------------------------------------------
 // 1. TAB NAVIGATION
@@ -325,12 +374,14 @@ function handleTap(e) {
     currentCount++;
     updateCounterUI();
     
-    if (currentCount === currentDhikr.daily_target) {
-        tg.HapticFeedback.notificationOccurred('success');
-    } else if (currentCount % 33 === 0) {
-        tg.HapticFeedback.impactOccurred('medium');
-    } else {
-        tg.HapticFeedback.impactOccurred('light');
+    if (hapticsEnabled) {
+        if (currentCount === currentDhikr.daily_target) {
+            tg.HapticFeedback.notificationOccurred('success');
+        } else if (currentCount % 33 === 0) {
+            tg.HapticFeedback.impactOccurred('medium');
+        } else {
+            tg.HapticFeedback.impactOccurred('light');
+        }
     }
 }
 
@@ -340,7 +391,7 @@ tapArea.addEventListener('touchstart', handleTap, {passive: false});
 document.getElementById('reset-btn').addEventListener('click', () => {
     currentCount = 0;
     updateCounterUI();
-    tg.HapticFeedback.impactOccurred('rigid');
+    if (hapticsEnabled) tg.HapticFeedback.impactOccurred('rigid');
 });
 
 // -----------------------------------------------------
