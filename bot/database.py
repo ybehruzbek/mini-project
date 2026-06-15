@@ -82,15 +82,21 @@ def add_default_dhikr(user_id, habit_level):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Odatiga qarab kunlik maqsadni belgilaymiz
+    # Odatiga qarab kunlik maqsadni belgilaymiz. Yangi boshlovchilar uchun biroz kamroq, qolganlar uchun 100 ta.
     target = 33 if habit_level == 'beginner' else 100
     
-    # Boshlang'ich 'Astag'firulloh' zikrini qo'shish
-    cursor.execute("""
-        INSERT INTO Dhikrs (user_id, title, target_count)
-        SELECT ?, 'Astag''firulloh', ?
-        WHERE NOT EXISTS (SELECT 1 FROM Dhikrs WHERE user_id=? AND title='Astag''firulloh')
-    """, (user_id, target, user_id))
+    dhikrs = [
+        ("Astagʻfirullahil aʼziym va atubi ilayh", target),
+        ("Hasbunallohu va ni'mal vakil", target),
+        ("Ya Malikul Mulk", target)
+    ]
+    
+    for title, tgt in dhikrs:
+        cursor.execute("""
+            INSERT INTO Dhikrs (user_id, title, target_count)
+            SELECT ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM Dhikrs WHERE user_id=? AND title=?)
+        """, (user_id, title, tgt, user_id, title))
     
     conn.commit()
     conn.close()
