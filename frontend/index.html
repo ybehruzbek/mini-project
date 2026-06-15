@@ -161,21 +161,23 @@
             </div>
 
             <!-- Fitness Ring -->
-            <div class="flex-1 flex flex-col items-center justify-center w-full relative tap-area" id="tap-area">
-                <svg class="w-72 h-72 drop-shadow-lg" viewBox="0 0 100 100">
-                    <!-- Background Ring -->
-                    <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6" opacity="0.5"/>
-                    <!-- Progress Ring -->
-                    <circle 
-                        id="progress-ring" class="ring-circle"
-                        cx="50" cy="50" r="44" fill="none" 
-                        stroke="var(--accent)" stroke-width="8" stroke-linecap="round"
-                        stroke-dasharray="276.46" stroke-dashoffset="276.46" 
-                    />
-                </svg>
-                <!-- Counter -->
-                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span id="counter" class="text-7xl font-bold tracking-tighter" style="font-variant-numeric: tabular-nums;">0</span>
+            <div class="flex-1 flex flex-col items-center justify-center w-full relative">
+                <div id="tap-area" class="w-72 h-72 relative tap-area rounded-full cursor-pointer touch-manipulation">
+                    <svg class="w-72 h-72 drop-shadow-lg absolute inset-0" viewBox="0 0 100 100">
+                        <!-- Background Ring -->
+                        <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6" opacity="0.5"/>
+                        <!-- Progress Ring -->
+                        <circle 
+                            id="progress-ring" class="ring-circle"
+                            cx="50" cy="50" r="44" fill="none" 
+                            stroke="var(--accent)" stroke-width="8" stroke-linecap="round"
+                            stroke-dasharray="276.46" stroke-dashoffset="276.46" 
+                        />
+                    </svg>
+                    <!-- Counter -->
+                    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span id="counter" class="text-7xl font-bold tracking-tighter" style="font-variant-numeric: tabular-nums;">0</span>
+                    </div>
                 </div>
             </div>
 
@@ -268,19 +270,19 @@
     <div class="glass-nav-container pb-safe">
         <nav class="glass-nav">
             <button class="nav-item active" data-target="view-tasbeh">
-                <i class="ph ph-fingerprint text-2xl"></i>
+                <i class="ph ph-hand-heart text-2xl"></i>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Tasbeh</span>
             </button>
             <button class="nav-item" data-target="view-zikrlar">
-                <i class="ph ph-list text-2xl"></i>
+                <i class="ph ph-book-open text-2xl"></i>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Zikrlar</span>
             </button>
             <button class="nav-item" data-target="view-stats">
-                <i class="ph ph-chart-bar text-2xl"></i>
+                <i class="ph ph-chart-line-up text-2xl"></i>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Statistika</span>
             </button>
             <button class="nav-item" data-target="view-profile">
-                <i class="ph ph-user text-2xl"></i>
+                <i class="ph ph-user-circle text-2xl"></i>
                 <span class="text-[10px] font-semibold uppercase tracking-wider">Profil</span>
             </button>
         </nav>
