@@ -3,7 +3,7 @@ import logging
 import os
 import sqlite3
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BotCommand
