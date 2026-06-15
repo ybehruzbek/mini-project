@@ -731,8 +731,13 @@ async def stats_handler(message: types.Message):
     text += f"🔥 Bugungi faol foydalanuvchilar: <b>{active_users} ta</b>\n\n"
     text += "📋 <b>Foydalanuvchilar ro'yxati:</b>\n"
     
+    gender_map = {"male": "Erkak", "female": "Ayol"}
+    age_map = {"under20": "20 yoshgacha", "21-30": "21-30 yosh", "31-50": "31-50 yosh", "over50": "50 yoshdan yuqori"}
+    
     for idx, u in enumerate(users, 1):
-        text += f"{idx}. {u[1]} ({u[2]}, {u[3]} yosh)\n"
+        gender = gender_map.get(u[2], u[2])
+        age = age_map.get(u[3], u[3])
+        text += f"{idx}. {u[1]} ({gender}, {age})\n"
         
     if len(text) > 4000:
         text = text[:4000] + "\n...va boshqalar."
