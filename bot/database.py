@@ -10,7 +10,7 @@ def init_db():
 
     # Users jadvallari (yoshni endi oralig'li TEXT sifatida olamiz)
     cursor.execute("""
-        CREATE TABLE Users (
+        CREATE TABLE IF NOT EXISTS Users (
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
             age TEXT,
@@ -24,7 +24,7 @@ def init_db():
 
     # Dhikrs jadvallari
     cursor.execute("""
-        CREATE TABLE Dhikrs (
+        CREATE TABLE IF NOT EXISTS Dhikrs (
             dhikr_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             title TEXT NOT NULL,
@@ -35,7 +35,7 @@ def init_db():
 
     # Daily_Progress jadvallari
     cursor.execute("""
-        CREATE TABLE Daily_Progress (
+        CREATE TABLE IF NOT EXISTS Daily_Progress (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             dhikr_id INTEGER,
