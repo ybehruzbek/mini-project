@@ -54,10 +54,17 @@ navItems.forEach(item => {
 // -----------------------------------------------------
 
 async function initApp() {
+    // Show Skeletons for tasbeh
+    document.getElementById('dhikr-title').innerHTML = '<div class="skeleton h-8 w-64 mx-auto rounded-md"></div>';
+    document.getElementById('target-count').innerHTML = '<div class="skeleton h-4 w-12 inline-block rounded-md"></div>';
+    document.getElementById('counter').innerHTML = '<div class="skeleton h-16 w-16 mx-auto rounded-md mt-2"></div>';
+
     // Show Skeletons for profile
     document.getElementById('profile-name').innerHTML = '<div class="skeleton h-6 w-32 mx-auto rounded-md"></div>';
     document.getElementById('profile-habit').innerHTML = '<div class="skeleton h-4 w-20 mx-auto rounded-md mt-1"></div>';
 
+    const start = Date.now();
+    
     // 1. Fetch User Profile
     const { data: user } = await supabaseClient.from('users').select('*').eq('user_id', userId).single();
     if (user) {
@@ -67,6 +74,17 @@ async function initApp() {
 
     // 2. Fetch Dhikrs
     await fetchDhikrs();
+    
+    // Ensure smooth premium loading feel
+    const elapsed = Date.now() - start;
+    if (elapsed < 400) await new Promise(r => setTimeout(r, 400 - elapsed));
+    
+    // If dhikr was loaded, counter was updated. If not, set to 0.
+    if (!currentDhikr) {
+        document.getElementById('dhikr-title').textContent = "Zikr qo'shing";
+        document.getElementById('target-count').textContent = "0";
+        document.getElementById('counter').textContent = "0";
+    }
 }
 
 async function fetchDhikrs() {
@@ -96,7 +114,11 @@ async function fetchDhikrs() {
         </div>
     `;
 
+    const start = Date.now();
     const { data: dhikrs, error } = await supabaseClient.from('dhikrs').select('*').eq('user_id', userId).order('id');
+    
+    const elapsed = Date.now() - start;
+    if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
     
     if (error || !dhikrs || dhikrs.length === 0) {
         listEl.innerHTML = `<p class="text-center opacity-50 py-4">Zikrlar topilmadi. Bot orqali zikr qo'shing.</p>`;
@@ -145,7 +167,11 @@ async function fetchStats() {
         <div class="glass-card p-3"><div class="skeleton h-4 w-4/6 rounded"></div></div>
     `;
 
+    const start = Date.now();
     const { data: dhikrs } = await supabaseClient.from('dhikrs').select('daily_count, global_count').eq('user_id', userId);
+    
+    const elapsed = Date.now() - start;
+    if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
     
     let totalDaily = 0;
     let totalGlobal = 0;
