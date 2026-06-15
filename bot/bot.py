@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import math
+import random
 from dotenv import load_dotenv
 from database import init_db, save_user_data, add_default_dhikr, get_user, DB_PATH
 
@@ -186,7 +187,7 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
 
 def get_completion_msg(title, daily_tgt, global_tgt):
     if daily_tgt <= 0:
-        return f"✅ Maqsad saqlandi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta"
+        return f"✅ <b>Maqsad saqlandi:</b>\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta"
     
     days = math.ceil(global_tgt / daily_tgt)
     months = ""
@@ -196,11 +197,27 @@ def get_completion_msg(title, daily_tgt, global_tgt):
         months = f" (taxminan {m} oy-u {d} kun)"
         
     return (
-        f"✅ Maqsad muvaffaqiyatli saqlandi!\n\n"
-        f"Siz **{title}** zikrini kuniga **{daily_tgt} marta** va umumiy **{global_tgt} marta** aytishni tanladingiz.\n\n"
-        f"Agar siz uni har kuni {daily_tgt} martadan aytsangiz, {global_tgt} talik ulug' maqsadga **{days} kun{months}** ichida to'liq aytib bo'lar ekansiz inshaalloh. 🤲\n\n"
-        f"Bot sizga har kuni mos vaqtlarda qulay eslatmalar berib turadi! 🌿"
+        f"✅ <b>Maqsad muvaffaqiyatli saqlandi!</b>\n\n"
+        f"<blockquote>Siz <b>{title}</b> zikrini kuniga <b>{daily_tgt}</b> marta va umumiy <b>{global_tgt}</b> marta aytishni tanladingiz.</blockquote>\n\n"
+        f"Agar siz uni har kuni {daily_tgt} martadan aytsangiz, {global_tgt} talik ulug' maqsadga <b>{days} kun{months}</b> ichida to'liq aytib bo'lar ekansiz inshaalloh. 🤲\n\n"
+        f"<i>Bot sizga har kuni mos vaqtlarda qulay eslatmalar berib turadi!</i> 🌿"
     )
+
+def get_start_action_keyboard():
+    hour = datetime.now().hour
+    buttons = [[InlineKeyboardButton(text="Hozirroq boshlayman 🚀", callback_data="start_action_now")]]
+    
+    if 8 <= hour < 18:
+        buttons.append([InlineKeyboardButton(text="1 soatdan so'ng ⏳", callback_data="start_action_1h")])
+        buttons.append([InlineKeyboardButton(text="Kechqurun 🌙", callback_data="start_action_evening")])
+    elif 18 <= hour < 22:
+        buttons.append([InlineKeyboardButton(text="Uxlashdan oldin 🛏", callback_data="start_action_bedtime")])
+        buttons.append([InlineKeyboardButton(text="Ertalabdan 🌅", callback_data="start_action_morning")])
+    else:
+        buttons.append([InlineKeyboardButton(text="Ertalabdan 🌅", callback_data="start_action_morning")])
+        
+    buttons.append([InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
@@ -296,8 +313,8 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
         conn.close()
                 
         await state.clear()
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
-        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
+        keyboard = get_start_action_keyboard()
+        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
 
 @dp.message(StateFilter(CustomDhikr.global_target))
@@ -319,10 +336,10 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
             
     await state.clear()
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
-    ])
-    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
+    await state.clear()
+    
+    keyboard = get_start_action_keyboard()
+    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
 
 # --- 2. Zikrni Tahrirlash FSM ---
@@ -389,7 +406,7 @@ async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMConte
         conn.close()
                 
         await state.clear()
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
+        keyboard = get_start_action_keyboard()
         
         # We need the title to show the completion message.
         conn = sqlite3.connect(DB_PATH)
@@ -398,7 +415,7 @@ async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMConte
         title = cursor.fetchone()[0]
         conn.close()
         
-        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
+        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
 
 @dp.message(StateFilter(EditDhikr.global_target))
@@ -422,10 +439,10 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
             
     await state.clear()
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
-    ])
-    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="Markdown")
+    await state.clear()
+    
+    keyboard = get_start_action_keyboard()
+    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
 @dp.callback_query(F.data == "settings")
 async def settings_handler(callback: types.CallbackQuery):
@@ -450,10 +467,29 @@ async def broadcast_reminder(reminder_type):
     ])
     
     msg_text = "Hozir ruhiyatni tinchlantirish uchun 2-3 daqiqa vaqtingiz bormi? 🌿"
+    
+    morning_msgs = [
+        "Xayrli tong! Kunning barakasi zikrdadir. Boshlaymizmi? 🌅",
+        "Yangi kun, yangi umidlar! Bugungi kuningizni zikr bilan yoriting! ✨",
+        "Assalomu alaykum! Tonggi zikrlarni aytishga vaqt ajratamizmi? 🕊"
+    ]
+    day_msgs = [
+        "Tushlik vaqti bo'ldi. Ruhiyatni ham ozgina oziqlantiramizmi? 🍃",
+        "Ishlardan biroz chalg'ib, zikrga 2 daqiqa ajratamiz! ⏳",
+        "Kuningiz qanday o'tyapti? Zikr aytib, biroz xotirjamlik toping. 🌸"
+    ]
+    evening_msgs = [
+        "Kuningiz xayrli o'tdimi? Uxlashdan oldin qalbni xotirjam qilaylik. 🌙",
+        "Bugungi kun amallarini go'zal zikrlar bilan yakunlaymiz! 🌟",
+        "Kech tushdi, endi o'zimizga biroz vaqt ajratamizmi? 📿"
+    ]
+    
     if reminder_type == "morning":
-        msg_text = "Xayrli tong! Bugungi zikr rejamizni boshlashga tayyormisiz? 🌅"
+        msg_text = random.choice(morning_msgs)
+    elif reminder_type in ["day", "afternoon"]:
+        msg_text = random.choice(day_msgs)
     elif reminder_type == "evening":
-        msg_text = "Kuningiz xayrli o'tdimi? Uxlashdan oldin zikrlarni to'ldirib qo'yamizmi? 🌙"
+        msg_text = random.choice(evening_msgs)
         
     for u in users:
         try:
@@ -467,9 +503,45 @@ async def send_specific_reminder(user_id, reminder_type):
         [InlineKeyboardButton(text="⏳ Yana birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
     ])
     try:
-        await bot.send_message(user_id, "Vaqtingiz bo'ldimi? Zikr qilishni boshlaymizmi? 🌿", reply_markup=keyboard)
+        await bot.send_message(user_id, "Siz belgilagan vaqt bo'ldi! Zikr qilishni boshlaymizmi? 🌿", reply_markup=keyboard)
     except Exception:
         pass
+
+@dp.callback_query(F.data.startswith("start_action_"))
+async def start_action_handler(callback: types.CallbackQuery):
+    action = callback.data.split("_")[2]
+    user_id = callback.from_user.id
+    
+    if action == "now":
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))]
+        ])
+        await callback.message.edit_text("Barakalloh! Tasbehni ochib zikrlarni boshlashingiz mumkin 👇", reply_markup=keyboard)
+        return
+        
+    run_date = None
+    now = datetime.now()
+    text = ""
+    
+    if action == "1h":
+        run_date = now + timedelta(hours=1)
+        text = "Tushunarli, ishlaringizga baraka! 1 soatdan keyin sizga eslataman. ⏳"
+    elif action == "evening":
+        run_date = now.replace(hour=20, minute=0, second=0)
+        if run_date <= now:
+            run_date += timedelta(hours=1)
+        text = "Kelishdik! Kechqurun o'zim yodga solaman. 🌙"
+    elif action == "bedtime":
+        run_date = now + timedelta(hours=1)
+        text = "Xo'p bo'ladi, uxlashdan biroz oldin eslatib qo'yaman. 🛏"
+    elif action == "morning":
+        text = "Juda yaxshi, ertaga tongdan yangi g'ayrat bilan boshlaymiz! 🌅\nXayrli tun."
+        
+    if run_date:
+        scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, "shaxsiy"])
+        
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
+    await callback.message.edit_text(text, reply_markup=keyboard)
 
 @dp.callback_query(F.data.startswith("remind_yes_"))
 async def remind_yes_handler(callback: types.CallbackQuery):
