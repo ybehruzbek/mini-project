@@ -237,8 +237,8 @@ def get_start_action_keyboard():
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
-    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_progress').eq('user_id', callback.from_user.id).execute()
-    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_progress']) for d in response.data]
+    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_count').eq('user_id', callback.from_user.id).execute()
+    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_count']) for d in response.data]
     
     text = "Sizning kundalik zikrlaringiz ro'yxati:\n\n"
     keyboard_buttons = []
@@ -326,7 +326,7 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
             'global_target': global_tgt,
             'daily_count': 0,
             'global_count': 0,
-            'global_progress': 0
+            'global_count': 0
         }).execute()
                 
         await state.clear()
@@ -352,7 +352,7 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
             'global_target': global_tgt,
             'daily_count': 0,
             'global_count': 0,
-            'global_progress': 0
+            'global_count': 0
         }).execute()
             
     await state.clear()
@@ -628,7 +628,7 @@ async def remind_later_handler(callback: types.CallbackQuery):
 # ==========================================
 
 async def render_log_dhikr(target, dhikr_id, user_id):
-    response = supabase.table('dhikrs').select('title, daily_target, global_target, global_progress').eq('id', dhikr_id).eq('user_id', user_id).execute()
+    response = supabase.table('dhikrs').select('title, daily_target, global_target, global_count').eq('id', dhikr_id).eq('user_id', user_id).execute()
     if not response.data:
         return
         
@@ -636,7 +636,7 @@ async def render_log_dhikr(target, dhikr_id, user_id):
     title = dhikr['title']
     daily_tgt = dhikr['daily_target']
     global_tgt = dhikr['global_target']
-    global_prog = dhikr['global_progress']
+    global_prog = dhikr['global_count']
     
     # Bugungi sanani olish va jadvalga qo'shish/tekshirish
     today = datetime.now().strftime("%Y-%m-%d")
@@ -840,10 +840,10 @@ async def log_add_handler(callback: types.CallbackQuery):
     
     today = datetime.now().strftime("%Y-%m-%d")
     
-    dhikr_resp = supabase.table('dhikrs').select('global_progress, daily_target').eq('id', dhikr_id).execute()
-    new_global = dhikr_resp.data[0]['global_progress'] + amount
+    dhikr_resp = supabase.table('dhikrs').select('global_count, daily_target').eq('id', dhikr_id).execute()
+    new_global = dhikr_resp.data[0]['global_count'] + amount
     daily_tgt = dhikr_resp.data[0]['daily_target']
-    supabase.table('dhikrs').update({'global_progress': new_global}).eq('id', dhikr_id).execute()
+    supabase.table('dhikrs').update({'global_count': new_global}).eq('id', dhikr_id).execute()
     
     prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     if prog_resp.data:
@@ -884,9 +884,9 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     today = datetime.now().strftime("%Y-%m-%d")
     
-    dhikr_resp = supabase.table('dhikrs').select('global_progress').eq('id', dhikr_id).execute()
-    new_global = dhikr_resp.data[0]['global_progress'] + amount
-    supabase.table('dhikrs').update({'global_progress': new_global}).eq('id', dhikr_id).execute()
+    dhikr_resp = supabase.table('dhikrs').select('global_count').eq('id', dhikr_id).execute()
+    new_global = dhikr_resp.data[0]['global_count'] + amount
+    supabase.table('dhikrs').update({'global_count': new_global}).eq('id', dhikr_id).execute()
     
     prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     if prog_resp.data:
