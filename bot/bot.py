@@ -455,9 +455,6 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
     keyboard = get_start_action_keyboard()
     await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
-@dp.callback_query(F.data == "settings")
-async def settings_handler(callback: types.CallbackQuery):
-    await callback.answer("Sozlamalar bo'limi tez orada ishga tushadi!", show_alert=True)
 
 # ==========================================
 # --- Eslatmalar (Scheduler) qismi ---
