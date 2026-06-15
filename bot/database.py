@@ -28,7 +28,9 @@ def init_db():
             dhikr_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             title TEXT NOT NULL,
-            target_count INTEGER DEFAULT 100,
+            daily_target INTEGER DEFAULT 100,
+            global_target INTEGER DEFAULT 40000,
+            global_progress INTEGER DEFAULT 0,
             FOREIGN KEY(user_id) REFERENCES Users(user_id)
         )
     """)
@@ -77,21 +79,22 @@ def add_default_dhikr(user_id, habit_level):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Odatiga qarab kunlik maqsadni belgilaymiz. Yangi boshlovchilar uchun biroz kamroq, qolganlar uchun 100 ta.
-    target = 33 if habit_level == 'beginner' else 100
+    # Odatiga qarab kunlik maqsadni belgilaymiz. Yangi boshlovchilar uchun biroz kamroq.
+    daily_tgt = 33 if habit_level == 'beginner' else 100
+    global_tgt = 40000
     
     dhikrs = [
-        ("Astagʻfirullahil aʼziym va atubi ilayh", target),
-        ("Hasbunallohu va ni'mal vakil", target),
-        ("Ya Malikul Mulk", target)
+        ("Astagʻfirullahil aʼziym va atubi ilayh", daily_tgt, global_tgt),
+        ("Hasbunallohu va ni'mal vakil", daily_tgt, global_tgt),
+        ("Ya Malikul Mulk", daily_tgt, global_tgt)
     ]
     
-    for title, tgt in dhikrs:
+    for title, daily, glbl in dhikrs:
         cursor.execute("""
-            INSERT INTO Dhikrs (user_id, title, target_count)
-            SELECT ?, ?, ?
+            INSERT INTO Dhikrs (user_id, title, daily_target, global_target)
+            SELECT ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM Dhikrs WHERE user_id=? AND title=?)
-        """, (user_id, title, tgt, user_id, title))
+        """, (user_id, title, daily, glbl, user_id, title))
     
     conn.commit()
     conn.close()

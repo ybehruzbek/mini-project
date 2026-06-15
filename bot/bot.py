@@ -7,6 +7,8 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from database import init_db, save_user_data, add_default_dhikr, get_user, DB_PATH
 
@@ -33,7 +35,13 @@ class Onboarding(StatesGroup):
 
 class CustomDhikr(StatesGroup):
     title = State()
-    target = State()
+    daily_target = State()
+    global_target = State()
+
+class EditDhikr(StatesGroup):
+    dhikr_id = State()
+    daily_target = State()
+    global_target = State()
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -187,18 +195,22 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
 async def view_dhikrs_handler(callback: types.CallbackQuery):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT title, target_count FROM Dhikrs WHERE user_id=?", (callback.from_user.id,))
+    cursor.execute("SELECT dhikr_id, title, daily_target, global_target, global_progress FROM Dhikrs WHERE user_id=?", (callback.fromuser_id if hasattr(callback, "fromuser_id") else callback.from_user.id,))
     dhikrs = cursor.fetchall()
     conn.close()
     
     text = "Sizning kundalik zikrlaringiz ro'yxati:\n\n"
+    keyboard_buttons = []
+    
     for idx, d in enumerate(dhikrs, 1):
-        text += f"{idx}. 📿 {d[0]}\n(Maqsad: {d[1]} ta)\n\n"
+        dhikr_id, title, daily_tgt, global_tgt, global_prog = d
+        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt} ta\n\n"
+        keyboard_buttons.append([InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}")])
         
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")],
-        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")]
-    ])
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")])
+    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     await callback.message.edit_text(text, reply_markup=keyboard)
 
@@ -226,13 +238,13 @@ async def process_custom_dhikr_title(message: types.Message, state: FSMContext):
     
     await state.update_data(title=message.text)
     
-    msg = await message.answer("Ushbu zikr uchun kunlik maqsadingiz nechta bo'lishini xohlaysiz?\n(Faqat raqam bilan, masalan: 100)")
+    msg = await message.answer("Ushbu zikr uchun KUNLIK maqsadingiz nechta bo'lishini xohlaysiz?\n(Faqat raqam bilan, masalan: 100)")
     messages.append(msg.message_id)
     await state.update_data(messages_to_delete=messages)
-    await state.set_state(CustomDhikr.target)
+    await state.set_state(CustomDhikr.daily_target)
 
-@dp.message(StateFilter(CustomDhikr.target))
-async def process_custom_dhikr_target(message: types.Message, state: FSMContext):
+@dp.message(StateFilter(CustomDhikr.daily_target))
+async def process_custom_dhikr_daily_target(message: types.Message, state: FSMContext):
     data = await state.get_data()
     messages = data.get('messages_to_delete', [])
     messages.append(message.message_id)
@@ -243,12 +255,32 @@ async def process_custom_dhikr_target(message: types.Message, state: FSMContext)
         await state.update_data(messages_to_delete=messages)
         return
         
+    await state.update_data(daily_target=int(message.text))
+    
+    msg = await message.answer("Ushbu zikr uchun UMUMIY (katta) maqsadingiz nechta?\n(Masalan: 40000 yoki 100000)")
+    messages.append(msg.message_id)
+    await state.update_data(messages_to_delete=messages)
+    await state.set_state(CustomDhikr.global_target)
+
+@dp.message(StateFilter(CustomDhikr.global_target))
+async def process_custom_dhikr_global_target(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    messages = data.get('messages_to_delete', [])
+    messages.append(message.message_id)
+    
+    if not message.text.isdigit():
+        msg = await message.answer("Iltimos, umumiy maqsadni faqat raqamlar bilan kiriting.")
+        messages.append(msg.message_id)
+        await state.update_data(messages_to_delete=messages)
+        return
+        
     title = data['title']
-    target = int(message.text)
+    daily_tgt = data['daily_target']
+    global_tgt = int(message.text)
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO Dhikrs (user_id, title, target_count) VALUES (?, ?, ?)", (message.from_user.id, title, target))
+    cursor.execute("INSERT INTO Dhikrs (user_id, title, daily_target, global_target) VALUES (?, ?, ?, ?)", (message.from_user.id, title, daily_tgt, global_tgt))
     conn.commit()
     conn.close()
     
@@ -264,14 +296,145 @@ async def process_custom_dhikr_target(message: types.Message, state: FSMContext)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
     ])
-    await message.answer(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title} ({target} ta)", reply_markup=keyboard)
+    await message.answer(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("edit_dhikr_"))
+async def edit_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
+    title = cursor.fetchone()[0]
+    conn.close()
+    
+    msg = await callback.message.edit_text(f"📿 {title}\n\nYangi KUNLIK maqsadni kiriting (raqam bilan):")
+    await state.set_state(EditDhikr.daily_target)
+    await state.update_data(dhikr_id=dhikr_id, messages_to_delete=[msg.message_id])
+
+@dp.message(StateFilter(EditDhikr.daily_target))
+async def process_edit_dhikr_daily(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    messages = data.get('messages_to_delete', [])
+    messages.append(message.message_id)
+    
+    if not message.text.isdigit():
+        msg = await message.answer("Iltimos, faqat raqam kiriting.")
+        messages.append(msg.message_id)
+        await state.update_data(messages_to_delete=messages)
+        return
+        
+    await state.update_data(daily_target=int(message.text))
+    
+    msg = await message.answer("Endi UMUMIY maqsadni kiriting (raqam bilan):")
+    messages.append(msg.message_id)
+    await state.update_data(messages_to_delete=messages)
+    await state.set_state(EditDhikr.global_target)
+
+@dp.message(StateFilter(EditDhikr.global_target))
+async def process_edit_dhikr_global(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    messages = data.get('messages_to_delete', [])
+    messages.append(message.message_id)
+    
+    if not message.text.isdigit():
+        msg = await message.answer("Iltimos, faqat raqam kiriting.")
+        messages.append(msg.message_id)
+        await state.update_data(messages_to_delete=messages)
+        return
+        
+    dhikr_id = data['dhikr_id']
+    daily_tgt = data['daily_target']
+    global_tgt = int(message.text)
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
+    conn.commit()
+    conn.close()
+    
+    for msg_id in messages:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
+        except Exception:
+            pass
+            
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
+    ])
+    await message.answer("✅ Zikr maqsadi muvaffaqiyatli yangilandi!", reply_markup=keyboard)
 
 @dp.callback_query(F.data == "settings")
 async def settings_handler(callback: types.CallbackQuery):
     await callback.answer("Sozlamalar bo'limi tez orada ishga tushadi!", show_alert=True)
 
+# --- Eslatmalar (Scheduler) qismi ---
+
+scheduler = AsyncIOScheduler()
+
+async def broadcast_reminder(reminder_type):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM Users")
+    users = cursor.fetchall()
+    conn.close()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
+        [InlineKeyboardButton(text="⏳ Birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
+    ])
+    
+    msg_text = "Hozir ruhiyatni tinchlantirish uchun 2-3 daqiqa vaqtingiz bormi? 🌿"
+    if reminder_type == "morning":
+        msg_text = "Xayrli tong! Bugungi zikr rejamizni boshlashga tayyormisiz? 🌅"
+    elif reminder_type == "evening":
+        msg_text = "Kuningiz xayrli o'tdimi? Uxlashdan oldin zikrlarni to'ldirib qo'yamizmi? 🌙"
+        
+    for u in users:
+        try:
+            await bot.send_message(u[0], msg_text, reply_markup=keyboard)
+        except Exception:
+            pass
+
+async def send_specific_reminder(user_id, reminder_type):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
+        [InlineKeyboardButton(text="⏳ Yana birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
+    ])
+    try:
+        await bot.send_message(user_id, "Vaqtingiz bo'ldimi? Zikr qilishni boshlaymizmi? 🌿", reply_markup=keyboard)
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("remind_yes_"))
+async def remind_yes_handler(callback: types.CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))]
+    ])
+    await callback.message.edit_text("Barakalloh! Tasbehni ochib, zikrlarni boshlashingiz mumkin 👇", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("remind_later_"))
+async def remind_later_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    reminder_type = callback.data.split("_")[2]
+    
+    run_date = datetime.now() + timedelta(hours=1)
+    scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, reminder_type])
+    
+    await callback.message.edit_text("Tushunarli, ishlaringizga baraka! 1 soatdan keyin yana eslataman. ⏳")
+
 async def main() -> None:
     init_db()
+    
+    # Eslatmalarni jadvalga qo'shish (Vaqtlarni O'zbekiston vaqtiga moslab olish kerak)
+    scheduler.add_job(broadcast_reminder, 'cron', hour=8, minute=0, args=["morning"])
+    scheduler.add_job(broadcast_reminder, 'cron', hour=13, minute=0, args=["day"])
+    scheduler.add_job(broadcast_reminder, 'cron', hour=17, minute=0, args=["afternoon"])
+    scheduler.add_job(broadcast_reminder, 'cron', hour=21, minute=0, args=["evening"])
+    scheduler.start()
+    
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
