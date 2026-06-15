@@ -8,11 +8,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Dastlabki bosqichda sxema yangilanishi uchun eski jadvallarni o'chiramiz
-    cursor.execute("DROP TABLE IF EXISTS Daily_Progress")
-    cursor.execute("DROP TABLE IF EXISTS Dhikrs")
-    cursor.execute("DROP TABLE IF EXISTS Users")
-
     # Users jadvallari (yoshni endi oralig'li TEXT sifatida olamiz)
     cursor.execute("""
         CREATE TABLE Users (
