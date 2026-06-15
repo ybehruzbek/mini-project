@@ -630,7 +630,10 @@ async def render_log_dhikr(target, dhikr_id, user_id):
             InlineKeyboardButton(text="➕ 100 ta qo'shish", callback_data=f"log_add_{dhikr_id}_100")
         ],
         [InlineKeyboardButton(text="✍️ Boshqa raqam yozish", callback_data=f"log_custom_{dhikr_id}")],
-        [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
+        [
+            InlineKeyboardButton(text="⬅️ Boshqa zikrni tanlash", callback_data="start_action_now"),
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="main_menu")
+        ]
     ])
     
     if isinstance(target, types.CallbackQuery):
@@ -642,6 +645,19 @@ async def render_log_dhikr(target, dhikr_id, user_id):
 async def select_log_handler(callback: types.CallbackQuery):
     dhikr_id = int(callback.data.split("_")[2])
     await render_log_dhikr(callback, dhikr_id, callback.from_user.id)
+
+@dp.callback_query(F.data == "main_menu")
+async def main_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = get_user(callback.from_user.id)
+    if user:
+        await callback.message.edit_text(
+            f"Assalomu alaykum yana bir bor, hurmatli {user[0]}! 🌙\n\n"
+            f"«Qalb Taskini» botiga xush kelibsiz. Zikrlarni davom ettirishingiz mumkin 👇",
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await callback.message.edit_text("Botga xush kelibsiz! Iltimos, /start buyrug'ini yuboring.")
 
 @dp.callback_query(F.data.startswith("log_add_"))
 async def log_add_handler(callback: types.CallbackQuery):
