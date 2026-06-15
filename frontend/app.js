@@ -54,6 +54,10 @@ navItems.forEach(item => {
 // -----------------------------------------------------
 
 async function initApp() {
+    // Show Skeletons for profile
+    document.getElementById('profile-name').innerHTML = '<div class="skeleton h-6 w-32 mx-auto rounded-md"></div>';
+    document.getElementById('profile-habit').innerHTML = '<div class="skeleton h-4 w-20 mx-auto rounded-md mt-1"></div>';
+
     // 1. Fetch User Profile
     const { data: user } = await supabaseClient.from('users').select('*').eq('user_id', userId).single();
     if (user) {
@@ -67,6 +71,31 @@ async function initApp() {
 
 async function fetchDhikrs() {
     const listEl = document.getElementById('dhikr-list');
+    
+    // Show Skeletons
+    listEl.innerHTML = `
+        <div class="glass-card p-4 flex items-center justify-between mb-3 border-transparent">
+            <div class="flex-1 pr-4">
+                <div class="skeleton h-5 w-3/4 mb-3"></div>
+                <div class="flex gap-4">
+                    <div class="skeleton h-3 w-16"></div>
+                    <div class="skeleton h-3 w-16"></div>
+                </div>
+            </div>
+            <div class="skeleton h-6 w-6 rounded-full"></div>
+        </div>
+        <div class="glass-card p-4 flex items-center justify-between mb-3 border-transparent">
+            <div class="flex-1 pr-4">
+                <div class="skeleton h-5 w-1/2 mb-3"></div>
+                <div class="flex gap-4">
+                    <div class="skeleton h-3 w-16"></div>
+                    <div class="skeleton h-3 w-16"></div>
+                </div>
+            </div>
+            <div class="skeleton h-6 w-6 rounded-full"></div>
+        </div>
+    `;
+
     const { data: dhikrs, error } = await supabaseClient.from('dhikrs').select('*').eq('user_id', userId).order('id');
     
     if (error || !dhikrs || dhikrs.length === 0) {
@@ -106,6 +135,16 @@ async function fetchDhikrs() {
 }
 
 async function fetchStats() {
+    // Show Skeletons for stats
+    document.getElementById('stat-daily').innerHTML = '<div class="skeleton h-10 w-24 mx-auto rounded-md"></div>';
+    document.getElementById('stat-global').innerHTML = '<div class="skeleton h-10 w-24 mx-auto rounded-md"></div>';
+    const pList = document.getElementById('progress-list');
+    pList.innerHTML = `
+        <div class="glass-card p-3 mb-2"><div class="skeleton h-4 w-full rounded"></div></div>
+        <div class="glass-card p-3 mb-2"><div class="skeleton h-4 w-5/6 rounded"></div></div>
+        <div class="glass-card p-3"><div class="skeleton h-4 w-4/6 rounded"></div></div>
+    `;
+
     const { data: dhikrs } = await supabaseClient.from('dhikrs').select('daily_count, global_count').eq('user_id', userId);
     
     let totalDaily = 0;
