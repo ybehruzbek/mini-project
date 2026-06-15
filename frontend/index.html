@@ -207,15 +207,16 @@
 
 
         <!-- =================== STATS VIEW =================== -->
-        <div id="view-stats" class="view-container w-full h-full px-6 pt-8">
+        <!-- =================== STATS VIEW =================== -->
+        <div id="view-stats" class="view-container w-full h-full px-6 pt-8 pb-32">
             <h1 class="text-3xl font-bold mb-6">Statistika</h1>
             
-            <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="grid grid-cols-2 gap-4 mb-4">
                 <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
                     <div class="w-10 h-10 rounded-full flex items-center justify-center mb-3" style="background: var(--accent-dim); color: var(--accent);">
                         <i class="ph ph-calendar-check text-xl"></i>
                     </div>
-                    <span class="text-sm opacity-60 font-medium">Bugungi</span>
+                    <span class="text-sm opacity-60 font-medium">Bugun</span>
                     <span id="stat-daily" class="text-2xl font-bold">0</span>
                 </div>
                 <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
@@ -227,9 +228,37 @@
                 </div>
             </div>
 
-            <h3 class="text-lg font-semibold mb-4">Faollik Tarixi</h3>
-            <div id="progress-list" class="flex flex-col gap-3">
-                <div class="glass-card p-4 h-16 skeleton"></div>
+            <!-- Streak and Top Dhikr -->
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="glass-card p-4 flex flex-col items-center justify-center text-center bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-900/30">
+                    <i class="ph ph-fire text-2xl text-orange-500 mb-1"></i>
+                    <span class="text-[10px] uppercase font-bold tracking-wider opacity-60">Seriya</span>
+                    <span id="stat-streak" class="text-xl font-bold text-orange-600 dark:text-orange-400">0 kun</span>
+                </div>
+                <div class="glass-card p-4 flex flex-col items-center justify-center text-center bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-900/30">
+                    <i class="ph ph-trophy text-2xl text-purple-500 mb-1"></i>
+                    <span class="text-[10px] uppercase font-bold tracking-wider opacity-60">Sevimli</span>
+                    <span id="stat-top" class="text-sm font-bold text-purple-600 dark:text-purple-400 mt-1 line-clamp-1 w-full truncate">...</span>
+                </div>
+            </div>
+
+            <h3 class="text-lg font-semibold mb-4">Oxirgi 7 kun</h3>
+            <div class="glass-card p-5 mb-10">
+                <!-- Bar Chart Container -->
+                <div id="chart-container" class="flex items-end justify-between h-32 gap-1.5 mt-2">
+                    <!-- Skeletons -->
+                    <div class="skeleton h-10 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-16 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-8 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-24 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-12 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-20 flex-1 rounded-t-md"></div>
+                    <div class="skeleton h-32 flex-1 rounded-t-md"></div>
+                </div>
+                <!-- X-Axis Labels -->
+                <div id="chart-labels" class="flex justify-between items-center mt-3 text-[10px] font-bold opacity-50 uppercase tracking-wide">
+                    <!-- Labels injected by JS -->
+                </div>
             </div>
         </div>
 

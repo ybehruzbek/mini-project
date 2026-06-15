@@ -160,49 +160,122 @@ async function fetchStats() {
     // Show Skeletons for stats
     document.getElementById('stat-daily').innerHTML = '<div class="skeleton h-10 w-24 mx-auto rounded-md"></div>';
     document.getElementById('stat-global').innerHTML = '<div class="skeleton h-10 w-24 mx-auto rounded-md"></div>';
-    const pList = document.getElementById('progress-list');
-    pList.innerHTML = `
-        <div class="glass-card p-3 mb-2"><div class="skeleton h-4 w-full rounded"></div></div>
-        <div class="glass-card p-3 mb-2"><div class="skeleton h-4 w-5/6 rounded"></div></div>
-        <div class="glass-card p-3"><div class="skeleton h-4 w-4/6 rounded"></div></div>
-    `;
+    document.getElementById('stat-streak').innerHTML = '<div class="skeleton h-6 w-16 mx-auto rounded-md mt-1"></div>';
+    document.getElementById('stat-top').innerHTML = '<div class="skeleton h-5 w-24 mx-auto rounded-md mt-1"></div>';
+    
+    // Chart skeletons are already in HTML, we'll replace them below
 
     const start = Date.now();
-    const { data: dhikrs } = await supabaseClient.from('dhikrs').select('daily_count, global_count').eq('user_id', userId);
+    const { data: dhikrs } = await supabaseClient.from('dhikrs').select('title, daily_count, global_count').eq('user_id', userId);
     
     const elapsed = Date.now() - start;
     if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
     
     let totalDaily = 0;
     let totalGlobal = 0;
+    let topDhikr = { title: "Yo'q", count: -1 };
     
     if (dhikrs) {
         dhikrs.forEach(d => {
             totalDaily += (d.daily_count || 0);
             totalGlobal += (d.global_count || 0);
+            if ((d.global_count || 0) > topDhikr.count) {
+                topDhikr = { title: d.title, count: d.global_count || 0 };
+            }
         });
     }
     
     document.getElementById('stat-daily').textContent = totalDaily;
     document.getElementById('stat-global').textContent = totalGlobal;
+    document.getElementById('stat-top').textContent = topDhikr.count > 0 ? topDhikr.title : "Hali yo'q";
     
-    // Fetch last 5 days progress
+    // Fetch progress for streak and chart
     const { data: progress } = await supabaseClient.from('daily_progress')
         .select('date, count')
         .eq('user_id', userId)
         .order('date', { ascending: false })
-        .limit(5);
+        .limit(100);
         
-    if (progress && progress.length > 0) {
-        pList.innerHTML = progress.map(p => `
-            <div class="glass-card p-3 flex justify-between items-center text-sm font-medium">
-                <span class="opacity-70">${p.date}</span>
-                <span class="text-[var(--accent)]">+${p.count} marta</span>
-            </div>
-        `).join('');
-    } else {
-        pList.innerHTML = `<p class="text-sm opacity-50 text-center py-2">Hali faollik yo'q</p>`;
+    // Group by date
+    const dailyTotals = {};
+    if (progress) {
+        progress.forEach(p => {
+            dailyTotals[p.date] = (dailyTotals[p.date] || 0) + p.count;
+        });
     }
+    
+    // Calculate Streak
+    let streak = 0;
+    const today = new Date();
+    const getLocalISODate = (d) => new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+    
+    let checkDate = new Date(today);
+    let checkStr = getLocalISODate(checkDate);
+    
+    // If no activity today, check if yesterday had activity to maintain streak
+    if (!dailyTotals[checkStr] || dailyTotals[checkStr] === 0) {
+        checkDate.setDate(checkDate.getDate() - 1);
+        checkStr = getLocalISODate(checkDate);
+    }
+    
+    // Count consecutive days backwards
+    while (dailyTotals[checkStr] > 0) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+        checkStr = getLocalISODate(checkDate);
+    }
+    
+    document.getElementById('stat-streak').textContent = `${streak} kun`;
+    
+    // Render 7-day Bar Chart
+    const chartContainer = document.getElementById('chart-container');
+    const chartLabels = document.getElementById('chart-labels');
+    chartContainer.innerHTML = '';
+    chartLabels.innerHTML = '';
+    
+    const last7Days = [];
+    const daysOfWeek = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan'];
+    let maxCount = 10; // Baseline to prevent div by zero
+    
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dStr = getLocalISODate(d);
+        const count = dailyTotals[dStr] || 0;
+        if (count > maxCount) maxCount = count;
+        last7Days.push({
+            dateStr: dStr,
+            dayName: i === 0 ? 'Bugun' : daysOfWeek[d.getDay()],
+            count: count
+        });
+    }
+    
+    last7Days.forEach(day => {
+        let heightPct = Math.max((day.count / maxCount) * 100, 5);
+        if (day.count === 0) heightPct = 5;
+        
+        const isToday = day.dayName === 'Bugun';
+        const colorClass = isToday ? 'bg-[var(--accent)] shadow-lg shadow-emerald-500/20' : (day.count > 0 ? 'bg-emerald-200 dark:bg-emerald-800' : 'bg-gray-100 dark:bg-gray-800');
+        
+        const barDiv = document.createElement('div');
+        barDiv.className = 'flex-1 flex flex-col justify-end group relative h-full';
+        barDiv.innerHTML = `
+            <div class="w-full ${colorClass} rounded-t-md transition-all duration-700 ease-out flex items-start justify-center relative" style="height: 0%">
+                <span class="text-[9px] font-bold absolute -top-5 text-gray-600 dark:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">${day.count > 0 ? day.count : ''}</span>
+            </div>
+        `;
+        chartContainer.appendChild(barDiv);
+        
+        // Trigger animation
+        setTimeout(() => {
+            barDiv.querySelector('div').style.height = `${heightPct}%`;
+        }, 50);
+        
+        const labelDiv = document.createElement('div');
+        labelDiv.className = `flex-1 text-center truncate ${isToday ? 'text-[var(--accent)]' : ''}`;
+        labelDiv.textContent = day.dayName;
+        chartLabels.appendChild(labelDiv);
+    });
 }
 
 // -----------------------------------------------------
