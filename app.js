@@ -5,7 +5,7 @@ tg.ready();
 // Supabase Configuration
 const SUPABASE_URL = 'https://rvrehsjveyvlnpxnmjqh.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2cmVoc2p2ZXl2bG5weG5tanFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MjkwMzgsImV4cCI6MjA5NzEwNTAzOH0.oJne7OxGW_6I1H37YpcOLKQ-_PPRi029VRrBVPlndf8';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // User State
 let userId = tg.initDataUnsafe?.user?.id || 1277687464; // Fallback for dev testing
@@ -55,7 +55,7 @@ navItems.forEach(item => {
 
 async function initApp() {
     // 1. Fetch User Profile
-    const { data: user } = await supabase.from('users').select('*').eq('user_id', userId).single();
+    const { data: user } = await supabaseClient.from('users').select('*').eq('user_id', userId).single();
     if (user) {
         document.getElementById('profile-name').textContent = user.full_name || 'Foydalanuvchi';
         document.getElementById('profile-habit').textContent = (user.habit_level || 'Odat') + ' darajasi';
@@ -67,7 +67,7 @@ async function initApp() {
 
 async function fetchDhikrs() {
     const listEl = document.getElementById('dhikr-list');
-    const { data: dhikrs, error } = await supabase.from('dhikrs').select('*').eq('user_id', userId).order('id');
+    const { data: dhikrs, error } = await supabaseClient.from('dhikrs').select('*').eq('user_id', userId).order('id');
     
     if (error || !dhikrs || dhikrs.length === 0) {
         listEl.innerHTML = `<p class="text-center opacity-50 py-4">Zikrlar topilmadi. Bot orqali zikr qo'shing.</p>`;
@@ -106,7 +106,7 @@ async function fetchDhikrs() {
 }
 
 async function fetchStats() {
-    const { data: dhikrs } = await supabase.from('dhikrs').select('daily_count, global_count').eq('user_id', userId);
+    const { data: dhikrs } = await supabaseClient.from('dhikrs').select('daily_count, global_count').eq('user_id', userId);
     
     let totalDaily = 0;
     let totalGlobal = 0;
@@ -122,7 +122,7 @@ async function fetchStats() {
     document.getElementById('stat-global').textContent = totalGlobal;
     
     // Fetch last 5 days progress
-    const { data: progress } = await supabase.from('daily_progress')
+    const { data: progress } = await supabaseClient.from('daily_progress')
         .select('date, count')
         .eq('user_id', userId)
         .order('date', { ascending: false })
@@ -224,7 +224,7 @@ document.getElementById('save-btn').addEventListener('click', async () => {
         const newGlobal = (currentDhikr.global_count || 0) + (diff > 0 ? diff : 0);
         
         // Update dhikr
-        await supabase.from('dhikrs').update({
+        await supabaseClient.from('dhikrs').update({
             daily_count: currentCount,
             global_count: newGlobal
         }).eq('id', currentDhikr.id);
@@ -233,13 +233,13 @@ document.getElementById('save-btn').addEventListener('click', async () => {
         const today = new Date().toISOString().split('T')[0];
         
         // check if exists
-        const { data: p } = await supabase.from('daily_progress')
+        const { data: p } = await supabaseClient.from('daily_progress')
             .select('*').eq('user_id', userId).eq('dhikr_id', currentDhikr.id).eq('date', today).single();
             
         if (p) {
-            await supabase.from('daily_progress').update({ count: currentCount }).eq('id', p.id);
+            await supabaseClient.from('daily_progress').update({ count: currentCount }).eq('id', p.id);
         } else {
-            await supabase.from('daily_progress').insert({
+            await supabaseClient.from('daily_progress').insert({
                 user_id: userId, dhikr_id: currentDhikr.id, date: today, count: currentCount
             });
         }
@@ -272,8 +272,8 @@ document.getElementById('save-btn').addEventListener('click', async () => {
 document.getElementById('hard-reset-btn').addEventListener('click', async () => {
     tg.showConfirm("Rostdan ham barcha statistika va zikrlarni o'chirasizmi? Bu amalni ortga qaytarib bo'lmaydi.", async (confirmed) => {
         if (confirmed) {
-            await supabase.from('dhikrs').delete().eq('user_id', userId);
-            await supabase.from('daily_progress').delete().eq('user_id', userId);
+            await supabaseClient.from('dhikrs').delete().eq('user_id', userId);
+            await supabaseClient.from('daily_progress').delete().eq('user_id', userId);
             tg.close();
         }
     });
