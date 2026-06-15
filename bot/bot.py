@@ -8,11 +8,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram.types.web_app_info import WebAppInfo
 from datetime import datetime, timedelta
 import math
 import random
 from dotenv import load_dotenv
-from database import init_db, save_user_data, add_default_dhikr, get_user, DB_PATH
+from database import init_db, save_user_data, add_default_dhikr, get_user, supabase
 
 ADMIN_ID = 1277687464
 
@@ -28,7 +29,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Vaqtincha Web App URL
-WEB_APP_URL = "https://qalb-taskini-miniapp.vercel.app/"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/"
 
 # Anketa holatlari (States)
 class Onboarding(StatesGroup):
@@ -134,6 +135,7 @@ async def ask_for_age(target_message, state: FSMContext):
 
 @dp.callback_query(StateFilter(Onboarding.name), F.data == "use_tg_name")
 async def process_name_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
     await state.update_data(full_name=callback.from_user.first_name)
     await ask_for_age(callback.message, state)
 
@@ -144,6 +146,7 @@ async def process_name_text(message: types.Message, state: FSMContext):
 
 @dp.callback_query(StateFilter(Onboarding.age), F.data.startswith("age_"))
 async def process_age(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
     age_group = callback.data.split("_")[1]
     await state.update_data(age=age_group)
     
@@ -156,6 +159,7 @@ async def process_age(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(StateFilter(Onboarding.gender), F.data.startswith("gender_"))
 async def process_gender(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
     gender = callback.data.split("_")[1]
     await state.update_data(gender=gender)
     
@@ -169,6 +173,7 @@ async def process_gender(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(StateFilter(Onboarding.habit), F.data.startswith("habit_"))
 async def process_habit(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
     habit = callback.data.split("_")[1]
     await state.update_data(habit_level=habit)
     
@@ -637,28 +642,30 @@ async def remind_later_handler(callback: types.CallbackQuery):
 # ==========================================
 
 async def render_log_dhikr(target, dhikr_id, user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, daily_target, global_target, global_progress FROM Dhikrs WHERE dhikr_id=? AND user_id=?", (dhikr_id, user_id))
-    dhikr = cursor.fetchone()
-    if not dhikr:
-        conn.close()
+    response = supabase.table('dhikrs').select('title, daily_target, global_target, global_progress').eq('id', dhikr_id).eq('user_id', user_id).execute()
+    if not response.data:
         return
         
-    title, daily_tgt, global_tgt, global_prog = dhikr
+    dhikr = response.data[0]
+    title = dhikr['title']
+    daily_tgt = dhikr['daily_target']
+    global_tgt = dhikr['global_target']
+    global_prog = dhikr['global_progress']
     
     # Bugungi sanani olish va jadvalga qo'shish/tekshirish
     today = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("SELECT current_count FROM Daily_Progress WHERE user_id=? AND dhikr_id=? AND date=?", (user_id, dhikr_id, today))
-    daily_prog_row = cursor.fetchone()
-    if daily_prog_row:
-        daily_prog = daily_prog_row[0]
+    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    
+    if prog_resp.data:
+        daily_prog = prog_resp.data[0]['current_count']
     else:
         daily_prog = 0
-        cursor.execute("INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) VALUES (?, ?, ?, ?)", (user_id, dhikr_id, today, 0))
-        conn.commit()
-        
-    conn.close()
+        supabase.table('daily_progress').insert({
+            'user_id': user_id,
+            'dhikr_id': dhikr_id,
+            'date': today,
+            'current_count': 0
+        }).execute()
     
     text = (
         f"<blockquote>📿 <b>{title}</b></blockquote>\n\n"
@@ -709,35 +716,27 @@ async def stats_handler(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
         
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
     # Umumiy foydalanuvchilar
-    cursor.execute("SELECT COUNT(*) FROM Users")
-    total_users = cursor.fetchone()[0]
+    total_users_resp = supabase.table('users').select('user_id', count='exact').execute()
+    total_users = total_users_resp.count
     
     # Bugun faol bo'lganlar (bugun zikr qilganlar)
     today = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM Daily_Progress WHERE date=?", (today,))
-    active_users = cursor.fetchone()[0]
+    active_users_resp = supabase.table('daily_progress').select('user_id', count='exact').eq('date', today).execute()
+    active_users = active_users_resp.count
     
     # Foydalanuvchilar ro'yxati
-    cursor.execute("SELECT user_id, full_name, gender, age FROM Users")
-    users = cursor.fetchall()
-    conn.close()
+    users_resp = supabase.table('users').select('user_id, full_name, habit_level').execute()
+    users = users_resp.data
     
     text = f"📊 <b>Admin Statistika</b>\n\n"
     text += f"👥 Umumiy foydalanuvchilar: <b>{total_users} ta</b>\n"
     text += f"🔥 Bugungi faol foydalanuvchilar: <b>{active_users} ta</b>\n\n"
     text += "📋 <b>Foydalanuvchilar ro'yxati:</b>\n"
     
-    gender_map = {"male": "Erkak", "female": "Ayol"}
-    age_map = {"under20": "20 yoshgacha", "21-30": "21-30 yosh", "31-50": "31-50 yosh", "over50": "50 yoshdan yuqori"}
-    
     for idx, u in enumerate(users, 1):
-        gender = gender_map.get(u[2], u[2])
-        age = age_map.get(u[3], u[3])
-        text += f"{idx}. {u[1]} ({gender}, {age})\n"
+        habit = u.get('habit_level', '')
+        text += f"{idx}. {u.get('full_name', 'Ismsiz')} ({habit})\n"
         
     if len(text) > 4000:
         text = text[:4000] + "\n...va boshqalar."
