@@ -1,0 +1,11 @@
+{
+  "name": "qalb-taskini-miniapp",
+  "version": 2,
+  "public": true,
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
+}
