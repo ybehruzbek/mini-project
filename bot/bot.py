@@ -522,8 +522,10 @@ async def send_daily_summary():
     
     for u in users:
         user_id = u[0]
-        cursor.execute("SELECT d.title, d.daily_target, IFNULL(dp.current_count, 0) FROM Dhikrs d LEFT JOIN Daily_Progress dp ON d.dhikr_id = dp.dhikr_id AND dp.date = ? WHERE d.user_id = ?", (today, user_id))
-        user_dhikrs = cursor.fetchall()
+        d_resp = supabase.table('dhikrs').select('id, title, daily_target').eq('user_id', user_id).execute()
+        p_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', user_id).eq('date', today).execute()
+        progress_dict = {p['dhikr_id']: p['count'] for p in p_resp.data}
+        user_dhikrs = [(d['title'], d['daily_target'], progress_dict.get(d['id'], 0)) for d in d_resp.data]
         
         if not user_dhikrs:
             continue
@@ -640,17 +642,17 @@ async def render_log_dhikr(target, dhikr_id, user_id):
     
     # Bugungi sanani olish va jadvalga qo'shish/tekshirish
     today = datetime.now().strftime("%Y-%m-%d")
-    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     
     if prog_resp.data:
-        daily_prog = prog_resp.data[0]['current_count']
+        daily_prog = prog_resp.data[0]['count']
     else:
         daily_prog = 0
         supabase.table('daily_progress').insert({
             'user_id': user_id,
             'dhikr_id': dhikr_id,
             'date': today,
-            'current_count': 0
+            'count': 0
         }).execute()
     
     text = (
@@ -845,13 +847,13 @@ async def log_add_handler(callback: types.CallbackQuery):
     daily_tgt = dhikr_resp.data[0]['daily_target']
     supabase.table('dhikrs').update({'global_count': new_global}).eq('id', dhikr_id).execute()
     
-    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     if prog_resp.data:
-        new_daily = prog_resp.data[0]['current_count'] + amount
-        supabase.table('daily_progress').update({'current_count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+        new_daily = prog_resp.data[0]['count'] + amount
+        supabase.table('daily_progress').update({'count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
         daily_prog = new_daily
     else:
-        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'current_count': amount}).execute()
+        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'count': amount}).execute()
         daily_prog = amount
     
     await render_log_dhikr(callback, dhikr_id, user_id)
@@ -888,12 +890,12 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     new_global = dhikr_resp.data[0]['global_count'] + amount
     supabase.table('dhikrs').update({'global_count': new_global}).eq('id', dhikr_id).execute()
     
-    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     if prog_resp.data:
-        new_daily = prog_resp.data[0]['current_count'] + amount
-        supabase.table('daily_progress').update({'current_count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+        new_daily = prog_resp.data[0]['count'] + amount
+        supabase.table('daily_progress').update({'count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     else:
-        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'current_count': amount}).execute()
+        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'count': amount}).execute()
     
     await state.clear()
     await render_log_dhikr(message, dhikr_id, user_id)
