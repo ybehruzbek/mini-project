@@ -50,6 +50,9 @@ class EditDhikr(StatesGroup):
 class LogDhikr(StatesGroup):
     custom_amount = State()
 
+class SettingsState(StatesGroup):
+    change_name = State()
+
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
@@ -743,6 +746,118 @@ async def stats_handler(message: types.Message):
         text = text[:4000] + "\n...va boshqalar."
         
     await message.answer(text, parse_mode="HTML")
+
+# ==========================================
+# --- Sozlamalar (Settings) ---
+# ==========================================
+
+@dp.callback_query(F.data == "settings")
+async def settings_handler(callback: types.CallbackQuery):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT full_name, age, habit_level FROM Users WHERE user_id=?", (callback.from_user.id,))
+    user_data = cursor.fetchone()
+    conn.close()
+    
+    if not user_data:
+        await callback.message.edit_text("Foydalanuvchi topilmadi. /start ni bosing.")
+        return
+        
+    name, age, habit = user_data
+    
+    habit_text = {
+        "beginner": "🌱 Yangi boshlayapman",
+        "medium": "🌿 Vaqt topganda qilaman",
+        "advanced": "🌳 Doimiy odatim bor"
+    }.get(habit, habit)
+    
+    age_text = {
+        "under20": "20 yoshgacha",
+        "21-30": "21-30 yosh",
+        "31-50": "31-50 yosh",
+        "over50": "50 yoshdan yuqori"
+    }.get(age, f"{age} yosh")
+    
+    text = (
+        "⚙️ <b>Sozlamalar</b>\n\n"
+        f"👤 Ism: <b>{name}</b>\n"
+        f"⏳ Yosh: <b>{age_text}</b>\n"
+        f"🔄 Odat: <b>{habit_text}</b>\n\n"
+        "<i>Quyidagilardan birini tanlang:</i>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Ismni o'zgartirish", callback_data="settings_name")],
+        [InlineKeyboardButton(text="📊 Zikr odatini o'zgartirish", callback_data="settings_habit")],
+        [InlineKeyboardButton(text="🗑 Barcha ma'lumotlarni o'chirish", callback_data="settings_reset")],
+        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data == "settings_name")
+async def settings_name_handler(callback: types.CallbackQuery, state: FSMContext):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]])
+    await callback.message.edit_text("Yangi ismingizni kiriting:", reply_markup=keyboard)
+    await state.set_state(SettingsState.change_name)
+
+@dp.message(StateFilter(SettingsState.change_name))
+async def process_settings_name(message: types.Message, state: FSMContext):
+    new_name = message.text
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Users SET full_name=? WHERE user_id=?", (new_name, message.from_user.id))
+    conn.commit()
+    conn.close()
+    
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Sozlamalarga qaytish", callback_data="settings")]])
+    await message.answer(f"Ismingiz <b>{new_name}</b> ga o'zgartirildi ✅", reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data == "settings_habit")
+async def settings_habit_handler(callback: types.CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌱 Yangi boshlayapman", callback_data="set_habit_beginner")],
+        [InlineKeyboardButton(text="🌿 Vaqt topganda qilaman", callback_data="set_habit_medium")],
+        [InlineKeyboardButton(text="🌳 Doimiy odatim bor", callback_data="set_habit_advanced")],
+        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]
+    ])
+    await callback.message.edit_text("Kunlik zikr qilish odatingizni yangilang:", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("set_habit_"))
+async def process_settings_habit(callback: types.CallbackQuery):
+    new_habit = callback.data.split("_")[2]
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Users SET habit_level=? WHERE user_id=?", (new_habit, callback.from_user.id))
+    conn.commit()
+    conn.close()
+    
+    await callback.answer("Zikr odatingiz yangilandi ✅")
+    await settings_handler(callback)
+
+@dp.callback_query(F.data == "settings_reset")
+async def settings_reset_handler(callback: types.CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ HA, HAMMASINI O'CHIRISH", callback_data="settings_reset_confirm")],
+        [InlineKeyboardButton(text="⬅️ Yo'q, qaytish", callback_data="settings")]
+    ])
+    await callback.message.edit_text("⚠️ <b>DIQQAT!</b>\n\nSizning barcha saqlangan zikrlaringiz, kunlik statistika va umuman hamma natijalaringiz qaytarib bo'lmaydigan qilib o'chiriladi. Ishonchingiz komilmi?", reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data == "settings_reset_confirm")
+async def settings_reset_confirm_handler(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM Daily_Progress WHERE user_id=?", (user_id,))
+    cursor.execute("DELETE FROM Dhikrs WHERE user_id=?", (user_id,))
+    cursor.execute("DELETE FROM Users WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    
+    await state.clear()
+    await callback.message.edit_text("🗑 Barcha ma'lumotlaringiz o'chirildi.\n\nYangi hayot boshlash uchun /start buyrug'ini yuboring.")
 
 @dp.callback_query(F.data.startswith("log_add_"))
 async def log_add_handler(callback: types.CallbackQuery):
