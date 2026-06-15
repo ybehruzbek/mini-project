@@ -45,6 +45,9 @@ class EditDhikr(StatesGroup):
     daily_target = State()
     global_target = State()
 
+class LogDhikr(StatesGroup):
+    custom_amount = State()
+
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))],
@@ -515,10 +518,22 @@ async def start_action_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     if action == "now":
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))]
-        ])
-        await callback.message.edit_text("Barakalloh! Tasbehni ochib zikrlarni boshlashingiz mumkin 👇", reply_markup=keyboard)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT dhikr_id, title FROM Dhikrs WHERE user_id=?", (user_id,))
+        dhikrs = cursor.fetchall()
+        conn.close()
+        
+        if not dhikrs:
+            await callback.message.edit_text("Hozircha zikrlaringiz yo'q.")
+            return
+            
+        if len(dhikrs) == 1:
+            await render_log_dhikr(callback, dhikrs[0][0], user_id)
+        else:
+            buttons = [[InlineKeyboardButton(text=f"📿 {d[1]}", callback_data=f"select_log_{d[0]}")] for d in dhikrs]
+            buttons.append([InlineKeyboardButton(text="⬅️ Menyuga qaytish", callback_data="view_dhikrs")])
+            await callback.message.edit_text("Qaysi zikrni o'qiymiz? Tanlang 👇", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         return
         
     run_date = None
@@ -547,20 +562,158 @@ async def start_action_handler(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("remind_yes_"))
 async def remind_yes_handler(callback: types.CallbackQuery):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📿 Tasbehni ochish", web_app=WebAppInfo(url=WEB_APP_URL))]
-    ])
-    await callback.message.edit_text("Barakalloh! Tasbehni ochib, zikrlarni boshlashingiz mumkin 👇", reply_markup=keyboard)
+    user_id = callback.from_user.id
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT dhikr_id, title FROM Dhikrs WHERE user_id=?", (user_id,))
+    dhikrs = cursor.fetchall()
+    conn.close()
+    
+    if not dhikrs:
+        await callback.message.edit_text("Hozircha zikrlaringiz yo'q.")
+        return
+        
+    if len(dhikrs) == 1:
+        await render_log_dhikr(callback, dhikrs[0][0], user_id)
+    else:
+        buttons = [[InlineKeyboardButton(text=f"📿 {d[1]}", callback_data=f"select_log_{d[0]}")] for d in dhikrs]
+        buttons.append([InlineKeyboardButton(text="⬅️ Menyuga qaytish", callback_data="view_dhikrs")])
+        await callback.message.edit_text("Qaysi zikrni o'qiymiz? Tanlang 👇", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @dp.callback_query(F.data.startswith("remind_later_"))
 async def remind_later_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    reminder_type = callback.data.split("_")[2]
-    
     run_date = datetime.now() + timedelta(hours=1)
-    scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, reminder_type])
-    
+    scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, "shaxsiy"])
     await callback.message.edit_text("Tushunarli, ishlaringizga baraka! 1 soatdan keyin yana eslataman. ⏳")
+
+
+# ==========================================
+# --- Inline Zikr Qayd Etish (Logging) ---
+# ==========================================
+
+async def render_log_dhikr(target, dhikr_id, user_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, daily_target, global_target, global_progress FROM Dhikrs WHERE dhikr_id=? AND user_id=?", (dhikr_id, user_id))
+    dhikr = cursor.fetchone()
+    if not dhikr:
+        conn.close()
+        return
+        
+    title, daily_tgt, global_tgt, global_prog = dhikr
+    
+    # Bugungi sanani olish va jadvalga qo'shish/tekshirish
+    today = datetime.now().strftime("%Y-%m-%d")
+    cursor.execute("SELECT current_count FROM Daily_Progress WHERE user_id=? AND dhikr_id=? AND date=?", (user_id, dhikr_id, today))
+    daily_prog_row = cursor.fetchone()
+    if daily_prog_row:
+        daily_prog = daily_prog_row[0]
+    else:
+        daily_prog = 0
+        cursor.execute("INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) VALUES (?, ?, ?, ?)", (user_id, dhikr_id, today, 0))
+        conn.commit()
+        
+    conn.close()
+    
+    text = (
+        f"<blockquote>📿 <b>{title}</b></blockquote>\n\n"
+        f"🔄 Bugungi holat: <b>{daily_prog:,} / {daily_tgt:,}</b>\n"
+        f"📈 Umumiy holat: <b>{global_prog:,} / {global_tgt:,}</b>\n\n"
+        f"<i>Qo'lingizda (yoki tasbehda) sanang va tayyor natijani botga kiritib boring 👇</i>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ 33 ta qo'shish", callback_data=f"log_add_{dhikr_id}_33"),
+            InlineKeyboardButton(text="➕ 100 ta qo'shish", callback_data=f"log_add_{dhikr_id}_100")
+        ],
+        [InlineKeyboardButton(text="✍️ Boshqa raqam yozish", callback_data=f"log_custom_{dhikr_id}")],
+        [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
+    ])
+    
+    if isinstance(target, types.CallbackQuery):
+        await target.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("select_log_"))
+async def select_log_handler(callback: types.CallbackQuery):
+    dhikr_id = int(callback.data.split("_")[2])
+    await render_log_dhikr(callback, dhikr_id, callback.from_user.id)
+
+@dp.callback_query(F.data.startswith("log_add_"))
+async def log_add_handler(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    dhikr_id = int(parts[2])
+    amount = int(parts[3])
+    user_id = callback.from_user.id
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("UPDATE Dhikrs SET global_progress = global_progress + ? WHERE dhikr_id=?", (amount, dhikr_id))
+    cursor.execute("""
+        INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) 
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, dhikr_id, date) DO UPDATE SET current_count = current_count + ?
+    """, (user_id, dhikr_id, today, amount, amount))
+    conn.commit()
+    
+    cursor.execute("SELECT daily_target FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
+    daily_tgt = cursor.fetchone()[0]
+    cursor.execute("SELECT current_count FROM Daily_Progress WHERE user_id=? AND dhikr_id=? AND date=?", (user_id, dhikr_id, today))
+    daily_prog = cursor.fetchone()[0]
+    conn.close()
+    
+    await render_log_dhikr(callback, dhikr_id, user_id)
+    
+    if daily_prog >= daily_tgt and (daily_prog - amount) < daily_tgt:
+        await callback.answer("🎉 Mashaa'Alloh! Bugungi maqsadingizga yetdingiz!", show_alert=True)
+    else:
+        await callback.answer(f"✅ +{amount} ta zikr muvaffaqiyatli qo'shildi!")
+
+@dp.callback_query(F.data.startswith("log_custom_"))
+async def log_custom_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    await state.update_data(dhikr_id=dhikr_id)
+    await state.set_state(LogDhikr.custom_amount)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"select_log_{dhikr_id}")]
+    ])
+    await callback.message.edit_text("Ushbu zikrni nechta o'qiganingizni aniq raqamda yozing (masalan: 250):", reply_markup=keyboard)
+
+@dp.message(StateFilter(LogDhikr.custom_amount))
+async def process_log_custom_amount(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Iltimos, faqat aniq raqam kiriting (masalan: 250).")
+        return
+        
+    amount = int(message.text)
+    data = await state.get_data()
+    dhikr_id = data['dhikr_id']
+    user_id = message.from_user.id
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Dhikrs SET global_progress = global_progress + ? WHERE dhikr_id=?", (amount, dhikr_id))
+    cursor.execute("""
+        INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) 
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, dhikr_id, date) DO UPDATE SET current_count = current_count + ?
+    """, (user_id, dhikr_id, today, amount, amount))
+    conn.commit()
+    conn.close()
+    
+    await state.clear()
+    await render_log_dhikr(message, dhikr_id, user_id)
+    
+    # Option to celebrate here too, but doing it simply:
+    await message.answer(f"✅ +{amount} ta zikr muvaffaqiyatli qo'shildi!")
 
 async def main() -> None:
     init_db()
