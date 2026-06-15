@@ -237,11 +237,8 @@ def get_start_action_keyboard():
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT dhikr_id, title, daily_target, global_target, global_progress FROM Dhikrs WHERE user_id=?", (callback.from_user.id,))
-    dhikrs = cursor.fetchall()
-    conn.close()
+    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_progress').eq('user_id', callback.from_user.id).execute()
+    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_progress']) for d in response.data]
     
     text = "Sizning kundalik zikrlaringiz ro'yxati:\n\n"
     keyboard_buttons = []
@@ -322,11 +319,15 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
         daily_tgt = data['daily_target']
         global_tgt = int(val)
         
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO Dhikrs (user_id, title, daily_target, global_target) VALUES (?, ?, ?, ?)", (callback.from_user.id, title, daily_tgt, global_tgt))
-        conn.commit()
-        conn.close()
+        supabase.table('dhikrs').insert({
+            'user_id': callback.from_user.id,
+            'title': title,
+            'daily_target': daily_tgt,
+            'global_target': global_tgt,
+            'daily_count': 0,
+            'global_count': 0,
+            'global_progress': 0
+        }).execute()
                 
         await state.clear()
         keyboard = get_start_action_keyboard()
@@ -344,11 +345,15 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
     daily_tgt = data['daily_target']
     global_tgt = int(message.text)
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO Dhikrs (user_id, title, daily_target, global_target) VALUES (?, ?, ?, ?)", (message.from_user.id, title, daily_tgt, global_tgt))
-    conn.commit()
-    conn.close()
+    supabase.table('dhikrs').insert({
+            'user_id': message.from_user.id,
+            'title': title,
+            'daily_target': daily_tgt,
+            'global_target': global_tgt,
+            'daily_count': 0,
+            'global_count': 0,
+            'global_progress': 0
+        }).execute()
             
     await state.clear()
     
@@ -364,11 +369,8 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
 async def edit_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
     dhikr_id = int(callback.data.split("_")[2])
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
-    title = cursor.fetchone()[0]
-    conn.close()
+    response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
+    title = response.data[0]['title']
     
     await callback.message.edit_text(
         f"📿 {title}\n\nYangi KUNLIK maqsadni tanlang:",
@@ -415,21 +417,17 @@ async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMConte
         daily_tgt = data['daily_target']
         global_tgt = int(val)
         
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
-        conn.commit()
-        conn.close()
+        supabase.table('dhikrs').update({
+            'daily_target': daily_tgt,
+            'global_target': global_tgt
+        }).eq('id', dhikr_id).execute()
                 
         await state.clear()
         keyboard = get_start_action_keyboard()
         
         # We need the title to show the completion message.
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
-        title = cursor.fetchone()[0]
-        conn.close()
+        response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
+        title = response.data[0]['title']
         
         await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
@@ -445,13 +443,13 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
     daily_tgt = data['daily_target']
     global_tgt = int(message.text)
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
-    cursor.execute("SELECT title FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
-    title = cursor.fetchone()[0]
-    conn.commit()
-    conn.close()
+    supabase.table('dhikrs').update({
+            'daily_target': daily_tgt,
+            'global_target': global_tgt
+        }).eq('id', dhikr_id).execute()
+    title_resp = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
+    title = title_resp.data[0]['title']
+    pass
             
     await state.clear()
     
@@ -468,11 +466,8 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
 scheduler = AsyncIOScheduler()
 
 async def broadcast_reminder(reminder_type):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM Users")
-    users = cursor.fetchall()
-    conn.close()
+    response = supabase.table('users').select('user_id').execute()
+    users = [(u['user_id'],) for u in response.data]
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
@@ -522,11 +517,8 @@ async def send_specific_reminder(user_id, reminder_type):
 
 async def send_daily_summary():
     today = datetime.now().strftime("%Y-%m-%d")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT user_id FROM Users")
-    users = cursor.fetchall()
+    response = supabase.table('users').select('user_id').execute()
+    users = [(u['user_id'],) for u in response.data]
     
     for u in users:
         user_id = u[0]
@@ -559,7 +551,7 @@ async def send_daily_summary():
         except Exception:
             pass
             
-    conn.close()
+    pass
 
 @dp.callback_query(F.data.startswith("start_action_"))
 async def start_action_handler(callback: types.CallbackQuery):
@@ -567,11 +559,8 @@ async def start_action_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     if action == "now":
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT dhikr_id, title FROM Dhikrs WHERE user_id=?", (user_id,))
-        dhikrs = cursor.fetchall()
-        conn.close()
+        response = supabase.table('dhikrs').select('id, title').eq('user_id', user_id).execute()
+        dhikrs = [(d['id'], d['title']) for d in response.data]
         
         if not dhikrs:
             await callback.message.edit_text("Hozircha zikrlaringiz yo'q.")
@@ -612,11 +601,8 @@ async def start_action_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("remind_yes_"))
 async def remind_yes_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT dhikr_id, title FROM Dhikrs WHERE user_id=?", (user_id,))
-    dhikrs = cursor.fetchall()
-    conn.close()
+    response = supabase.table('dhikrs').select('id, title').eq('user_id', user_id).execute()
+    dhikrs = [(d['id'], d['title']) for d in response.data]
     
     if not dhikrs:
         await callback.message.edit_text("Hozircha zikrlaringiz yo'q.")
@@ -749,11 +735,12 @@ async def stats_handler(message: types.Message):
 
 @dp.callback_query(F.data == "settings")
 async def settings_handler(callback: types.CallbackQuery):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT full_name, age, habit_level FROM Users WHERE user_id=?", (callback.from_user.id,))
-    user_data = cursor.fetchone()
-    conn.close()
+    response = supabase.table('users').select('full_name, age, habit_level').eq('user_id', callback.from_user.id).execute()
+    if response.data:
+        ud = response.data[0]
+        user_data = (ud['full_name'], ud['age'], ud['habit_level'])
+    else:
+        user_data = None
     
     if not user_data:
         await callback.message.edit_text("Foydalanuvchi topilmadi. /start ni bosing.")
@@ -800,11 +787,7 @@ async def settings_name_handler(callback: types.CallbackQuery, state: FSMContext
 @dp.message(StateFilter(SettingsState.change_name))
 async def process_settings_name(message: types.Message, state: FSMContext):
     new_name = message.text
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE Users SET full_name=? WHERE user_id=?", (new_name, message.from_user.id))
-    conn.commit()
-    conn.close()
+    supabase.table('users').update({'full_name': new_name}).eq('user_id', message.from_user.id).execute()
     
     await state.clear()
     
@@ -824,11 +807,7 @@ async def settings_habit_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("set_habit_"))
 async def process_settings_habit(callback: types.CallbackQuery):
     new_habit = callback.data.split("_")[2]
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE Users SET habit_level=? WHERE user_id=?", (new_habit, callback.from_user.id))
-    conn.commit()
-    conn.close()
+    supabase.table('users').update({'habit_level': new_habit}).eq('user_id', callback.from_user.id).execute()
     
     await callback.answer("Zikr odatingiz yangilandi ✅")
     await settings_handler(callback)
@@ -844,13 +823,10 @@ async def settings_reset_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "settings_reset_confirm")
 async def settings_reset_confirm_handler(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM Daily_Progress WHERE user_id=?", (user_id,))
-    cursor.execute("DELETE FROM Dhikrs WHERE user_id=?", (user_id,))
-    cursor.execute("DELETE FROM Users WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
+    supabase.table('daily_progress').delete().eq('user_id', user_id).execute()
+    supabase.table('dhikrs').delete().eq('user_id', user_id).execute()
+    supabase.table('users').delete().eq('user_id', user_id).execute()
+    pass
     
     await state.clear()
     await callback.message.edit_text("🗑 Barcha ma'lumotlaringiz o'chirildi.\n\nYangi hayot boshlash uchun /start buyrug'ini yuboring.")
@@ -864,22 +840,19 @@ async def log_add_handler(callback: types.CallbackQuery):
     
     today = datetime.now().strftime("%Y-%m-%d")
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    dhikr_resp = supabase.table('dhikrs').select('global_progress, daily_target').eq('id', dhikr_id).execute()
+    new_global = dhikr_resp.data[0]['global_progress'] + amount
+    daily_tgt = dhikr_resp.data[0]['daily_target']
+    supabase.table('dhikrs').update({'global_progress': new_global}).eq('id', dhikr_id).execute()
     
-    cursor.execute("UPDATE Dhikrs SET global_progress = global_progress + ? WHERE dhikr_id=?", (amount, dhikr_id))
-    cursor.execute("""
-        INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) 
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, dhikr_id, date) DO UPDATE SET current_count = current_count + ?
-    """, (user_id, dhikr_id, today, amount, amount))
-    conn.commit()
-    
-    cursor.execute("SELECT daily_target FROM Dhikrs WHERE dhikr_id=?", (dhikr_id,))
-    daily_tgt = cursor.fetchone()[0]
-    cursor.execute("SELECT current_count FROM Daily_Progress WHERE user_id=? AND dhikr_id=? AND date=?", (user_id, dhikr_id, today))
-    daily_prog = cursor.fetchone()[0]
-    conn.close()
+    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    if prog_resp.data:
+        new_daily = prog_resp.data[0]['current_count'] + amount
+        supabase.table('daily_progress').update({'current_count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+        daily_prog = new_daily
+    else:
+        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'current_count': amount}).execute()
+        daily_prog = amount
     
     await render_log_dhikr(callback, dhikr_id, user_id)
     
@@ -911,16 +884,16 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     today = datetime.now().strftime("%Y-%m-%d")
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE Dhikrs SET global_progress = global_progress + ? WHERE dhikr_id=?", (amount, dhikr_id))
-    cursor.execute("""
-        INSERT INTO Daily_Progress (user_id, dhikr_id, date, current_count) 
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, dhikr_id, date) DO UPDATE SET current_count = current_count + ?
-    """, (user_id, dhikr_id, today, amount, amount))
-    conn.commit()
-    conn.close()
+    dhikr_resp = supabase.table('dhikrs').select('global_progress').eq('id', dhikr_id).execute()
+    new_global = dhikr_resp.data[0]['global_progress'] + amount
+    supabase.table('dhikrs').update({'global_progress': new_global}).eq('id', dhikr_id).execute()
+    
+    prog_resp = supabase.table('daily_progress').select('current_count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    if prog_resp.data:
+        new_daily = prog_resp.data[0]['current_count'] + amount
+        supabase.table('daily_progress').update({'current_count': new_daily}).eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    else:
+        supabase.table('daily_progress').insert({'user_id': user_id, 'dhikr_id': dhikr_id, 'date': today, 'current_count': amount}).execute()
     
     await state.clear()
     await render_log_dhikr(message, dhikr_id, user_id)
