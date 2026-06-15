@@ -50,6 +50,33 @@ def get_main_keyboard():
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="settings")]
     ])
 
+def get_daily_target_keyboard(prefix):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="33 ta", callback_data=f"{prefix}_daily_33"),
+            InlineKeyboardButton(text="100 ta", callback_data=f"{prefix}_daily_100")
+        ],
+        [
+            InlineKeyboardButton(text="500 ta", callback_data=f"{prefix}_daily_500"),
+            InlineKeyboardButton(text="1000 ta", callback_data=f"{prefix}_daily_1000")
+        ],
+        [InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data=f"{prefix}_daily_manual")]
+    ])
+
+def get_global_target_keyboard(prefix):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="10,000 ta", callback_data=f"{prefix}_global_10000"),
+            InlineKeyboardButton(text="40,000 ta", callback_data=f"{prefix}_global_40000")
+        ],
+        [
+            InlineKeyboardButton(text="100,000 ta", callback_data=f"{prefix}_global_100000"),
+            InlineKeyboardButton(text="1,000,000 ta", callback_data=f"{prefix}_global_1000000")
+        ],
+        [InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data=f"{prefix}_global_manual")]
+    ])
+
+
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message, state: FSMContext) -> None:
     # Eski foydalanuvchi ekanligini tekshiramiz
@@ -66,7 +93,7 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
     # Yangi foydalanuvchi bo'lsa, anketa boshlanadi
     first_name = message.from_user.first_name
     
-    welcome_msg = await message.answer(
+    await message.answer(
         f"Assalomu alaykum, {first_name}! 🌙\n\n"
         "«Qalb Taskini» — ruhiy xotirjamlik va doimiy zikrda bo'lishingiz uchun yaratilgan shaxsiy yordamchingiz.\n\n"
         "Bu yerda siz o'z zikrlaringizni tartibga solishingiz, eslatmalar olishingiz va qulay elektron tasbehdan foydalanishingiz mumkin. 🌿"
@@ -76,14 +103,11 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
         [InlineKeyboardButton(text=f"Ha, '{first_name}' qolaversin", callback_data="use_tg_name")]
     ])
     
-    question_msg = await message.answer(
+    await message.answer(
         f"Siz bilan yaqinroq tanishishim va botni aynan sizga moslashim uchun ismingiz kerak.\n\n"
         f"Sizga Telegramdagi ismingiz ({first_name}) bilan murojaat qilaymi yoki bu yerga o'zingiz boshqa ism yozasizmi?",
         reply_markup=keyboard
     )
-    
-    # Xabarlarni tozalash uchun ro'yxatni boshlaymiz
-    await state.update_data(messages_to_delete=[message.message_id, welcome_msg.message_id, question_msg.message_id])
     await state.set_state(Onboarding.name)
 
 # Yosh so'rash uchun umumiy funksiya (kodni qayta ishlatish uchun)
@@ -94,27 +118,16 @@ async def ask_for_age(target_message, state: FSMContext):
         [InlineKeyboardButton(text="🌳 31-50 yosh", callback_data="age_31-50")],
         [InlineKeyboardButton(text="🏔 50 yoshdan yuqori", callback_data="age_over50")]
     ])
-    msg = await target_message.answer("Sizga moslashtirishim uchun, yosh oralig'ingizni belgilang:", reply_markup=keyboard)
-    
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
+    await target_message.answer("Sizga moslashtirishim uchun, yosh oralig'ingizni belgilang:", reply_markup=keyboard)
     await state.set_state(Onboarding.age)
 
 @dp.callback_query(StateFilter(Onboarding.name), F.data == "use_tg_name")
 async def process_name_callback(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(full_name=callback.from_user.first_name)
-    await callback.message.delete()
     await ask_for_age(callback.message, state)
 
 @dp.message(StateFilter(Onboarding.name))
 async def process_name_text(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    await state.update_data(messages_to_delete=messages)
-    
     await state.update_data(full_name=message.text)
     await ask_for_age(message, state)
 
@@ -123,18 +136,11 @@ async def process_age(callback: types.CallbackQuery, state: FSMContext):
     age_group = callback.data.split("_")[1]
     await state.update_data(age=age_group)
     
-    await callback.message.delete()
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨 Erkak", callback_data="gender_male"),
          InlineKeyboardButton(text="👩 Ayol", callback_data="gender_female")]
     ])
-    msg = await callback.message.answer("Jinsingizni belgilang:", reply_markup=keyboard)
-    
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
+    await callback.message.answer("Jinsingizni belgilang:", reply_markup=keyboard)
     await state.set_state(Onboarding.gender)
 
 @dp.callback_query(StateFilter(Onboarding.gender), F.data.startswith("gender_"))
@@ -142,20 +148,12 @@ async def process_gender(callback: types.CallbackQuery, state: FSMContext):
     gender = callback.data.split("_")[1]
     await state.update_data(gender=gender)
     
-    await callback.message.delete()
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌱 Yangi boshlayapman", callback_data="habit_beginner")],
         [InlineKeyboardButton(text="🌿 Vaqt topganda qilaman", callback_data="habit_medium")],
         [InlineKeyboardButton(text="🌳 Doimiy odatim bor", callback_data="habit_advanced")]
     ])
-    msg = await callback.message.answer("Kunlik zikr qilish odatingiz qanday?", reply_markup=keyboard)
-    
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
-    
+    await callback.message.answer("Kunlik zikr qilish odatingiz qanday?", reply_markup=keyboard)
     await state.set_state(Onboarding.habit)
 
 @dp.callback_query(StateFilter(Onboarding.habit), F.data.startswith("habit_"))
@@ -169,18 +167,9 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
     save_user_data(user_id, data)
     add_default_dhikr(user_id, habit)
     
-    await callback.message.delete()
-    
-    messages_to_delete = data.get('messages_to_delete', [])
-    for msg_id in messages_to_delete:
-        try:
-            await bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
-        except Exception:
-            pass
-    
     await state.clear()
     
-    name = data['full_name']
+    name = data.get('full_name', "Do'stim")
     
     await callback.message.answer(
         f"Rahmat, hurmatli {name}! Ma'lumotlaringiz muvaffaqiyatli saqlandi. ✅\n\n"
@@ -189,13 +178,16 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
 
+
+# ==========================================
 # --- Zikrlarni boshqarish qismi ---
+# ==========================================
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT dhikr_id, title, daily_target, global_target, global_progress FROM Dhikrs WHERE user_id=?", (callback.fromuser_id if hasattr(callback, "fromuser_id") else callback.from_user.id,))
+    cursor.execute("SELECT dhikr_id, title, daily_target, global_target, global_progress FROM Dhikrs WHERE user_id=?", (callback.from_user.id,))
     dhikrs = cursor.fetchall()
     conn.close()
     
@@ -211,7 +203,6 @@ async def view_dhikrs_handler(callback: types.CallbackQuery):
     keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
     await callback.message.edit_text(text, reply_markup=keyboard)
 
 @dp.callback_query(F.data == "back_to_main")
@@ -224,56 +215,79 @@ async def back_to_main_handler(callback: types.CallbackQuery):
         reply_markup=get_main_keyboard()
     )
 
+# --- 1. Yangi Zikr Qo'shish FSM ---
+
 @dp.callback_query(F.data == "add_custom_dhikr")
 async def add_custom_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
-    msg = await callback.message.edit_text("Yangi zikringiz matnini yozing:\n(Masalan: Subhanalloh)")
+    await callback.message.edit_text("Yangi zikringiz matnini yozing:\n(Masalan: Subhanalloh)")
     await state.set_state(CustomDhikr.title)
-    await state.update_data(messages_to_delete=[msg.message_id])
 
 @dp.message(StateFilter(CustomDhikr.title))
 async def process_custom_dhikr_title(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    
     await state.update_data(title=message.text)
-    
-    msg = await message.answer("Ushbu zikr uchun KUNLIK maqsadingiz nechta bo'lishini xohlaysiz?\n(Faqat raqam bilan, masalan: 100)")
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
+    await message.answer(
+        "Ushbu zikr uchun KUNLIK maqsadingiz nechta bo'lishini xohlaysiz?",
+        reply_markup=get_daily_target_keyboard("custom")
+    )
     await state.set_state(CustomDhikr.daily_target)
 
+@dp.callback_query(StateFilter(CustomDhikr.daily_target), F.data.startswith("custom_daily_"))
+async def process_custom_daily_btn(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[2]
+    if val == "manual":
+        await callback.message.edit_text("Iltimos, kunlik maqsadni raqamda yozing (masalan: 150):")
+        # state remains daily_target
+    else:
+        await state.update_data(daily_target=int(val))
+        await callback.message.edit_text(
+            f"Kunlik maqsad: {val} ta ✅\n\nUshbu zikr uchun UMUMIY (katta) maqsadingiz nechta?",
+            reply_markup=get_global_target_keyboard("custom")
+        )
+        await state.set_state(CustomDhikr.global_target)
+
 @dp.message(StateFilter(CustomDhikr.daily_target))
-async def process_custom_dhikr_daily_target(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    
+async def process_custom_dhikr_daily_target_msg(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        msg = await message.answer("Iltimos, maqsadni faqat raqamlar bilan kiriting.")
-        messages.append(msg.message_id)
-        await state.update_data(messages_to_delete=messages)
+        await message.answer("Iltimos, maqsadni faqat raqamlar bilan kiriting.")
         return
         
     await state.update_data(daily_target=int(message.text))
-    
-    msg = await message.answer("Ushbu zikr uchun UMUMIY (katta) maqsadingiz nechta?\n(Masalan: 40000 yoki 100000)")
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
+    await message.answer(
+        f"Kunlik maqsad: {message.text} ta ✅\n\nUshbu zikr uchun UMUMIY (katta) maqsadingiz nechta?",
+        reply_markup=get_global_target_keyboard("custom")
+    )
     await state.set_state(CustomDhikr.global_target)
 
+@dp.callback_query(StateFilter(CustomDhikr.global_target), F.data.startswith("custom_global_"))
+async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[2]
+    if val == "manual":
+        await callback.message.edit_text("Iltimos, umumiy maqsadni raqamda yozing (masalan: 70000):")
+        # state remains global_target
+    else:
+        data = await state.get_data()
+        title = data['title']
+        daily_tgt = data['daily_target']
+        global_tgt = int(val)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Dhikrs (user_id, title, daily_target, global_target) VALUES (?, ?, ?, ?)", (callback.from_user.id, title, daily_tgt, global_tgt))
+        conn.commit()
+        conn.close()
+                
+        await state.clear()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
+        await callback.message.edit_text(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta", reply_markup=keyboard)
+
+
 @dp.message(StateFilter(CustomDhikr.global_target))
-async def process_custom_dhikr_global_target(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    
+async def process_custom_dhikr_global_target_msg(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        msg = await message.answer("Iltimos, umumiy maqsadni faqat raqamlar bilan kiriting.")
-        messages.append(msg.message_id)
-        await state.update_data(messages_to_delete=messages)
+        await message.answer("Iltimos, umumiy maqsadni faqat raqamlar bilan kiriting.")
         return
         
+    data = await state.get_data()
     title = data['title']
     daily_tgt = data['daily_target']
     global_tgt = int(message.text)
@@ -283,13 +297,6 @@ async def process_custom_dhikr_global_target(message: types.Message, state: FSMC
     cursor.execute("INSERT INTO Dhikrs (user_id, title, daily_target, global_target) VALUES (?, ?, ?, ?)", (message.from_user.id, title, daily_tgt, global_tgt))
     conn.commit()
     conn.close()
-    
-    # Xabarlarni tozalash
-    for msg_id in messages:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
-        except Exception:
-            pass
             
     await state.clear()
     
@@ -297,6 +304,9 @@ async def process_custom_dhikr_global_target(message: types.Message, state: FSMC
         [InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]
     ])
     await message.answer(f"✅ Yangi zikr muvaffaqiyatli qo'shildi:\n\n📿 {title}\nKunlik: {daily_tgt} ta | Umumiy: {global_tgt} ta", reply_markup=keyboard)
+
+
+# --- 2. Zikrni Tahrirlash FSM ---
 
 @dp.callback_query(F.data.startswith("edit_dhikr_"))
 async def edit_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -308,41 +318,69 @@ async def edit_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
     title = cursor.fetchone()[0]
     conn.close()
     
-    msg = await callback.message.edit_text(f"📿 {title}\n\nYangi KUNLIK maqsadni kiriting (raqam bilan):")
+    await callback.message.edit_text(
+        f"📿 {title}\n\nYangi KUNLIK maqsadni tanlang:",
+        reply_markup=get_daily_target_keyboard("edit")
+    )
     await state.set_state(EditDhikr.daily_target)
-    await state.update_data(dhikr_id=dhikr_id, messages_to_delete=[msg.message_id])
+    await state.update_data(dhikr_id=dhikr_id)
+
+
+@dp.callback_query(StateFilter(EditDhikr.daily_target), F.data.startswith("edit_daily_"))
+async def process_edit_daily_btn(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[2]
+    if val == "manual":
+        await callback.message.edit_text("Iltimos, yangi kunlik maqsadni raqamda yozing:")
+    else:
+        await state.update_data(daily_target=int(val))
+        await callback.message.edit_text(
+            f"Kunlik maqsad: {val} ta ✅\n\nEndi UMUMIY maqsadni tanlang:",
+            reply_markup=get_global_target_keyboard("edit")
+        )
+        await state.set_state(EditDhikr.global_target)
 
 @dp.message(StateFilter(EditDhikr.daily_target))
-async def process_edit_dhikr_daily(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    
+async def process_edit_dhikr_daily_msg(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        msg = await message.answer("Iltimos, faqat raqam kiriting.")
-        messages.append(msg.message_id)
-        await state.update_data(messages_to_delete=messages)
+        await message.answer("Iltimos, faqat raqam kiriting.")
         return
         
     await state.update_data(daily_target=int(message.text))
-    
-    msg = await message.answer("Endi UMUMIY maqsadni kiriting (raqam bilan):")
-    messages.append(msg.message_id)
-    await state.update_data(messages_to_delete=messages)
+    await message.answer(
+        f"Kunlik maqsad: {message.text} ta ✅\n\nEndi UMUMIY maqsadni tanlang:",
+        reply_markup=get_global_target_keyboard("edit")
+    )
     await state.set_state(EditDhikr.global_target)
 
+@dp.callback_query(StateFilter(EditDhikr.global_target), F.data.startswith("edit_global_"))
+async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[2]
+    if val == "manual":
+        await callback.message.edit_text("Iltimos, yangi umumiy maqsadni raqamda yozing:")
+    else:
+        data = await state.get_data()
+        dhikr_id = data['dhikr_id']
+        daily_tgt = data['daily_target']
+        global_tgt = int(val)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
+        conn.commit()
+        conn.close()
+                
+        await state.clear()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
+        await callback.message.edit_text("✅ Zikr maqsadi muvaffaqiyatli yangilandi!", reply_markup=keyboard)
+
+
 @dp.message(StateFilter(EditDhikr.global_target))
-async def process_edit_dhikr_global(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    messages = data.get('messages_to_delete', [])
-    messages.append(message.message_id)
-    
+async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        msg = await message.answer("Iltimos, faqat raqam kiriting.")
-        messages.append(msg.message_id)
-        await state.update_data(messages_to_delete=messages)
+        await message.answer("Iltimos, faqat raqam kiriting.")
         return
         
+    data = await state.get_data()
     dhikr_id = data['dhikr_id']
     daily_tgt = data['daily_target']
     global_tgt = int(message.text)
@@ -352,12 +390,6 @@ async def process_edit_dhikr_global(message: types.Message, state: FSMContext):
     cursor.execute("UPDATE Dhikrs SET daily_target=?, global_target=? WHERE dhikr_id=?", (daily_tgt, global_tgt, dhikr_id))
     conn.commit()
     conn.close()
-    
-    for msg_id in messages:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
-        except Exception:
-            pass
             
     await state.clear()
     
@@ -370,7 +402,9 @@ async def process_edit_dhikr_global(message: types.Message, state: FSMContext):
 async def settings_handler(callback: types.CallbackQuery):
     await callback.answer("Sozlamalar bo'limi tez orada ishga tushadi!", show_alert=True)
 
+# ==========================================
 # --- Eslatmalar (Scheduler) qismi ---
+# ==========================================
 
 scheduler = AsyncIOScheduler()
 
