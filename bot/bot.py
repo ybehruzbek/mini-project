@@ -373,19 +373,93 @@ async def view_dhikrs_handler(callback: types.CallbackQuery):
     response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_count').eq('user_id', callback.from_user.id).execute()
     dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_count']) for d in response.data]
     
+    if not dhikrs:
+        await callback.message.edit_text(
+            "📿 Hali zikr qo'shilmagan.\n\nQuyidagi tugma orqali yangi zikr qo'shing:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")],
+                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")]
+            ])
+        )
+        return
+    
     text = "Sizning kundalik zikrlaringiz ro'yxati:\n\n"
     keyboard_buttons = []
     
     for idx, d in enumerate(dhikrs, 1):
         dhikr_id, title, daily_tgt, global_tgt, global_prog = d
-        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt} ta\n\n"
-        keyboard_buttons.append([InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}")])
+        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt:,} ta\nO'qilgan: {global_prog:,} marta\n\n"
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}"),
+            InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"deldhikr_confirm_{dhikr_id}")
+        ])
         
     keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")])
     keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("deldhikr_confirm_"))
+async def deldhikr_confirm_handler(callback: types.CallbackQuery):
+    """O'chirishni tasdiqlash"""
+    dhikr_id = int(callback.data.split("_")[2])
+    response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
+    title = response.data[0]['title'] if response.data else "Zikr"
+    
+    await callback.message.edit_text(
+        f"⚠️ <b>Rostdan ham o'chirasizmi?</b>\n\n"
+        f"📿 <b>{title}</b>\n\n"
+        f"Barcha progress ma'lumotlari ham o'chadi.\nBu amalni ortga qaytarib bo'lmaydi!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"deldhikr_yes_{dhikr_id}")],
+            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="view_dhikrs")]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+@dp.callback_query(F.data.startswith("deldhikr_yes_"))
+async def deldhikr_execute_handler(callback: types.CallbackQuery):
+    """Zikrni o'chirish"""
+    dhikr_id = int(callback.data.split("_")[2])
+    
+    # Avval daily_progress'larni o'chirish
+    supabase.table('daily_progress').delete().eq('dhikr_id', dhikr_id).execute()
+    # Keyin zikrni o'chirish
+    supabase.table('dhikrs').delete().eq('id', dhikr_id).execute()
+    
+    await callback.answer("🗑 Zikr o'chirib tashlandi!")
+    
+    # Ro'yxatga qaytish
+    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_count').eq('user_id', callback.from_user.id).execute()
+    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_count']) for d in response.data]
+    
+    if not dhikrs:
+        await callback.message.edit_text(
+            "📿 Barcha zikrlar o'chirildi.\n\nYangi zikr qo'shing:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")],
+                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")]
+            ])
+        )
+        return
+    
+    text = "✅ Zikr o'chirildi!\n\nQolgan zikrlaringiz:\n\n"
+    keyboard_buttons = []
+    for idx, d in enumerate(dhikrs, 1):
+        dhikr_id, title, daily_tgt, global_tgt, global_prog = d
+        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt:,} ta\nO'qilgan: {global_prog:,} marta\n\n"
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}"),
+            InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"deldhikr_confirm_{dhikr_id}")
+        ])
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")])
+    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main_handler(callback: types.CallbackQuery):
@@ -645,11 +719,10 @@ def build_dua_card(duas, index, category):
     else:
         buttons.append([InlineKeyboardButton(text="✅ Web-appda ko'rsatish", callback_data=f"dua_on_{category}_{idx}_{dua['id']}")])
     
-    # Tahrirlash va o'chirish (faqat custom)
+    # Tahrirlash va o'chirish
     action_row = []
     action_row.append(InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"dua_edit_{category}_{idx}_{dua['id']}"))
-    if category == "custom":
-        action_row.append(InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"dua_del_{category}_{idx}_{dua['id']}"))
+    action_row.append(InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"dua_del_{category}_{idx}_{dua['id']}"))
     buttons.append(action_row)
     
     # Orqaga
