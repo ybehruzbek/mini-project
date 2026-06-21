@@ -25,6 +25,7 @@ from duas_data import (
     get_random_dua, get_prayer_dua_category, format_dua_message,
     MORNING_DUAS, EVENING_DUAS
 )
+from dhikr_guidelines import POST_DHIKR_GUIDANCE, POST_DHIKR_GUIDANCE_SHORT, DHIKR_RULES, get_dua_rules
 
 ADMIN_ID = 1277687464
 
@@ -63,6 +64,13 @@ class EditDhikr(StatesGroup):
     dhikr_id = State()
     daily_target = State()
     global_target = State()
+
+class EditDhikrField(StatesGroup):
+    """B-variant: faqat tanlangan maydonni tahrirlash"""
+    title = State()
+    daily = State()
+    global_t = State()
+    arabic = State()
 
 class LogDhikr(StatesGroup):
     custom_amount = State()
@@ -155,17 +163,12 @@ async def web_app_data_handler(message: types.Message):
             target = data.get('target', 0)
             
             if count >= target and target > 0:
-                text = (
-                    f"🎉 <b>Mashaa'Alloh!</b>\n\n"
-                    f"📿 <b>{title}</b> — bugungi maqsadga yetdingiz!\n"
-                    f"✅ Qilingan: <b>{count}</b> / {target}\n\n"
-                    f"<i>Alloh taolo qabul qilsin! 🤲</i>"
-                )
+                text = POST_DHIKR_GUIDANCE.format(title=title, count=f"{count:,}")
             else:
                 text = (
                     f"✅ <b>Saqlandi!</b>\n\n"
                     f"📿 <b>{title}</b>\n"
-                    f"📊 Bugungi holat: <b>{count}</b> / {target}\n\n"
+                    f"📊 Bugungi holat: <b>{count:,}</b> / {target:,}\n\n"
                     f"<i>Davom eting, baraka topasiz inshaalloh! 🌿</i>"
                 )
             
@@ -370,96 +373,435 @@ async def view_stats_handler(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "view_dhikrs")
 async def view_dhikrs_handler(callback: types.CallbackQuery):
-    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_count').eq('user_id', callback.from_user.id).execute()
-    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_count']) for d in response.data]
+    user_id = callback.from_user.id
+    response = supabase.table('dhikrs').select('*').eq('user_id', user_id).order('id').execute()
+    dhikrs = response.data or []
     
     if not dhikrs:
         await callback.message.edit_text(
             "📿 Hali zikr qo'shilmagan.\n\nQuyidagi tugma orqali yangi zikr qo'shing:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")],
-                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")]
+                [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_main")]
             ])
         )
         return
     
-    text = "Sizning kundalik zikrlaringiz ro'yxati:\n\n"
-    keyboard_buttons = []
+    # Bugungi progress olish
+    today = datetime.now().strftime("%Y-%m-%d")
+    prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', user_id).eq('date', today).execute()
+    today_progress = {}
+    if prog_resp.data:
+        for p in prog_resp.data:
+            today_progress[p['dhikr_id']] = p.get('count', 0)
     
-    for idx, d in enumerate(dhikrs, 1):
-        dhikr_id, title, daily_tgt, global_tgt, global_prog = d
-        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt:,} ta\nO'qilgan: {global_prog:,} marta\n\n"
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}"),
-            InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"deldhikr_confirm_{dhikr_id}")
-        ])
-        
-    keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")])
-    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    text, keyboard = build_dhikr_card(dhikrs, 0, today_progress)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-@dp.callback_query(F.data.startswith("deldhikr_confirm_"))
-async def deldhikr_confirm_handler(callback: types.CallbackQuery):
-    """O'chirishni tasdiqlash"""
-    dhikr_id = int(callback.data.split("_")[2])
-    response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
-    title = response.data[0]['title'] if response.data else "Zikr"
+def build_dhikr_card(dhikrs, index, today_progress=None):
+    """Bitta zikrni karta ko'rinishida yaratish"""
+    total = len(dhikrs)
+    if total == 0:
+        return None, None
+    
+    idx = index % total
+    d = dhikrs[idx]
+    today_count = (today_progress or {}).get(d['id'], 0)
+    daily_tgt = d.get('daily_target', 0)
+    global_count = d.get('global_count', 0)
+    global_tgt = d.get('global_target', 0)
+    arabic = d.get('arabic', '')
+    daily_done = today_count >= daily_tgt and daily_tgt > 0
+    
+    text = f"📿 <b>Zikrlaringiz</b>  ({idx + 1} / {total})\n"
+    text += "━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # Arabcha
+    if arabic and arabic.strip():
+        text += f"📜 <b>Arabcha:</b>\n<blockquote>{arabic}</blockquote>\n\n"
+    
+    # Nomi
+    text += f"📖 <b>Zikr:</b> {d['title']}\n\n"
+    
+    # Progress
+    text += f"📊 <b>Maqsadlar:</b>\n"
+    daily_emoji = "✅" if daily_done else "🔄"
+    text += f"  {daily_emoji} Kunlik: <b>{today_count:,}</b> / {daily_tgt:,}\n"
+    
+    global_pct = round(global_count / global_tgt * 100, 1) if global_tgt > 0 else 0
+    text += f"  🌍 Umumiy: <b>{global_count:,}</b> / {global_tgt:,} ({global_pct}%)\n"
+    
+    # Keyboard
+    buttons = []
+    
+    # Navigatsiya
+    nav_row = []
+    if total > 1:
+        prev_idx = (idx - 1) % total
+        next_idx = (idx + 1) % total
+        nav_row.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"zcard_{prev_idx}"))
+        nav_row.append(InlineKeyboardButton(text=f"{idx + 1}/{total}", callback_data="noop"))
+        nav_row.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"zcard_{next_idx}"))
+    else:
+        nav_row.append(InlineKeyboardButton(text=f"1/1", callback_data="noop"))
+    buttons.append(nav_row)
+    
+    # Tugatdim tugmasi
+    buttons.append([InlineKeyboardButton(text="✅ Tugatdim!", callback_data=f"zdone_{idx}_{d['id']}")])
+    
+    # Qoidalar va Tahrirlash
+    buttons.append([
+        InlineKeyboardButton(text="📋 Qoidalar", callback_data=f"zrules_{idx}"),
+        InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"zedit_{idx}_{d['id']}")
+    ])
+    
+    # O'chirish
+    buttons.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"zdel_{idx}_{d['id']}")])
+    
+    # Orqaga
+    buttons.append([
+        InlineKeyboardButton(text="➕ Yangi zikr", callback_data="add_custom_dhikr"),
+        InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="back_to_main")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return text, keyboard
+
+
+# --- Zikr Kartalar Navigatsiya ---
+
+@dp.callback_query(F.data.startswith("zcard_"))
+async def zcard_handler(callback: types.CallbackQuery):
+    """Zikr kartasini ko'rsatish: zcard_{index}"""
+    index = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    
+    response = supabase.table('dhikrs').select('*').eq('user_id', user_id).order('id').execute()
+    dhikrs = response.data or []
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', user_id).eq('date', today).execute()
+    today_progress = {}
+    if prog_resp.data:
+        for p in prog_resp.data:
+            today_progress[p['dhikr_id']] = p.get('count', 0)
+    
+    text, keyboard = build_dhikr_card(dhikrs, index, today_progress)
+    if text:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Tugatdim! ---
+
+@dp.callback_query(F.data.startswith("zdone_"))
+async def zdone_handler(callback: types.CallbackQuery):
+    """Zikr tugatildi: zdone_{index}_{dhikr_id}"""
+    parts = callback.data.split("_")
+    index = int(parts[1])
+    dhikr_id = int(parts[2])
+    
+    user_id = callback.from_user.id
+    d = supabase.table('dhikrs').select('title, daily_target, global_count').eq('id', dhikr_id).execute()
+    if not d.data:
+        await callback.answer("Zikr topilmadi!", show_alert=True)
+        return
+    
+    dhikr = d.data[0]
+    today = datetime.now().strftime("%Y-%m-%d")
+    prog = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
+    today_count = prog.data[0]['count'] if prog.data else 0
+    
+    text = POST_DHIKR_GUIDANCE.format(
+        title=dhikr['title'],
+        count=f"{today_count:,}"
+    )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📿 Keyingi zikrga", callback_data=f"zcard_{(index + 1)}")],
+            [InlineKeyboardButton(text="🤲 Zikrlar ro'yxati", callback_data="view_dhikrs")],
+            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="back_to_main")]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+# --- Qoidalar ---
+
+@dp.callback_query(F.data.startswith("zrules_"))
+async def zrules_handler(callback: types.CallbackQuery):
+    """Zikr qoidalari: zrules_{index}"""
+    index = int(callback.data.split("_")[1])
+    
+    await callback.message.edit_text(
+        DHIKR_RULES,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Zikrga qaytish", callback_data=f"zcard_{index}")]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+# --- O'chirish (tasdiqlash bilan) ---
+
+@dp.callback_query(F.data.startswith("zdel_"))
+async def zdel_handler(callback: types.CallbackQuery):
+    """Zikr o'chirish tasdiqlash: zdel_{index}_{dhikr_id}"""
+    parts = callback.data.split("_")
+    index = int(parts[1])
+    dhikr_id = int(parts[2])
+    
+    d = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
+    title = d.data[0]['title'] if d.data else "Zikr"
     
     await callback.message.edit_text(
         f"⚠️ <b>Rostdan ham o'chirasizmi?</b>\n\n"
         f"📿 <b>{title}</b>\n\n"
         f"Barcha progress ma'lumotlari ham o'chadi.\nBu amalni ortga qaytarib bo'lmaydi!",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"deldhikr_yes_{dhikr_id}")],
-            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="view_dhikrs")]
+            [InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"zdelyes_{index}_{dhikr_id}")],
+            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"zcard_{index}")]
         ]),
         parse_mode="HTML"
     )
 
 
-@dp.callback_query(F.data.startswith("deldhikr_yes_"))
-async def deldhikr_execute_handler(callback: types.CallbackQuery):
-    """Zikrni o'chirish"""
-    dhikr_id = int(callback.data.split("_")[2])
+@dp.callback_query(F.data.startswith("zdelyes_"))
+async def zdelyes_handler(callback: types.CallbackQuery):
+    """Zikrni o'chirish: zdelyes_{index}_{dhikr_id}"""
+    parts = callback.data.split("_")
+    dhikr_id = int(parts[2])
     
-    # Avval daily_progress'larni o'chirish
     supabase.table('daily_progress').delete().eq('dhikr_id', dhikr_id).execute()
-    # Keyin zikrni o'chirish
     supabase.table('dhikrs').delete().eq('id', dhikr_id).execute()
     
     await callback.answer("🗑 Zikr o'chirib tashlandi!")
     
     # Ro'yxatga qaytish
-    response = supabase.table('dhikrs').select('id, title, daily_target, global_target, global_count').eq('user_id', callback.from_user.id).execute()
-    dhikrs = [(d['id'], d['title'], d['daily_target'], d['global_target'], d['global_count']) for d in response.data]
+    response = supabase.table('dhikrs').select('*').eq('user_id', callback.from_user.id).order('id').execute()
+    dhikrs = response.data or []
     
     if not dhikrs:
         await callback.message.edit_text(
             "📿 Barcha zikrlar o'chirildi.\n\nYangi zikr qo'shing:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")],
-                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")]
+                [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_main")]
             ])
         )
         return
     
-    text = "✅ Zikr o'chirildi!\n\nQolgan zikrlaringiz:\n\n"
-    keyboard_buttons = []
-    for idx, d in enumerate(dhikrs, 1):
-        dhikr_id, title, daily_tgt, global_tgt, global_prog = d
-        text += f"{idx}. 📿 {title}\nKunlik: {daily_tgt} ta | Umumiy maqsad: {global_tgt:,} ta\nO'qilgan: {global_prog:,} marta\n\n"
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=f"✏️ {idx}-zikrni tahrirlash", callback_data=f"edit_dhikr_{dhikr_id}"),
-            InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"deldhikr_confirm_{dhikr_id}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi zikr qo'shish", callback_data="add_custom_dhikr")])
-    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_main")])
+    new_idx = min(int(parts[1]), len(dhikrs) - 1)
+    today = datetime.now().strftime("%Y-%m-%d")
+    prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', callback.from_user.id).eq('date', today).execute()
+    today_progress = {}
+    if prog_resp.data:
+        for p in prog_resp.data:
+            today_progress[p['dhikr_id']] = p.get('count', 0)
     
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    text, keyboard = build_dhikr_card(dhikrs, new_idx, today_progress)
+    await callback.message.edit_text("✅ Zikr o'chirildi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
 
+
+# --- B-variant Tahrirlash (Inline Menu) ---
+
+@dp.callback_query(F.data.startswith("zedit_"))
+async def zedit_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    """Tahrirlash menyu: zedit_{index}_{dhikr_id}"""
+    parts = callback.data.split("_")
+    index = int(parts[1])
+    dhikr_id = int(parts[2])
+    
+    d = supabase.table('dhikrs').select('title, daily_target, global_target, arabic').eq('id', dhikr_id).execute()
+    if not d.data:
+        await callback.answer("Zikr topilmadi!", show_alert=True)
+        return
+    
+    dhikr = d.data[0]
+    arabic_text = dhikr.get('arabic', '') or 'Kiritilmagan'
+    
+    text = (
+        f"✏️ <b>{dhikr['title']}</b>\n\n"
+        f"Nimani o'zgartirmoqchisiz?\n"
+    )
+    
+    await state.update_data(dhikr_id=dhikr_id, dhikr_index=index)
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"📝 Nomini o'zgartirish", callback_data=f"zef_title_{dhikr_id}")],
+            [InlineKeyboardButton(text=f"🎯 Kunlik maqsad ({dhikr['daily_target']:,})", callback_data=f"zef_daily_{dhikr_id}")],
+            [InlineKeyboardButton(text=f"🌍 Umumiy maqsad ({dhikr['global_target']:,})", callback_data=f"zef_global_{dhikr_id}")],
+            [InlineKeyboardButton(text=f"📜 Arabchasini o'zgartirish", callback_data=f"zef_arabic_{dhikr_id}")],
+            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"zcard_{index}")]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+@dp.callback_query(F.data.startswith("zef_title_"))
+async def zef_title_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    await state.update_data(dhikr_id=dhikr_id)
+    await state.set_state(EditDhikrField.title)
+    await callback.message.edit_text("📝 Yangi nomni yozing:")
+
+
+@dp.message(StateFilter(EditDhikrField.title))
+async def zef_title_save(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'title': message.text}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', message.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await message.answer("✅ Nom yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("zef_daily_"))
+async def zef_daily_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    await state.update_data(dhikr_id=dhikr_id)
+    await state.set_state(EditDhikrField.daily)
+    await callback.message.edit_text(
+        "🎯 Yangi kunlik maqsadni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="33", callback_data="zefd_33"),
+             InlineKeyboardButton(text="100", callback_data="zefd_100"),
+             InlineKeyboardButton(text="500", callback_data="zefd_500")],
+            [InlineKeyboardButton(text="1000", callback_data="zefd_1000"),
+             InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data="zefd_manual")]
+        ])
+    )
+
+
+@dp.callback_query(StateFilter(EditDhikrField.daily), F.data.startswith("zefd_"))
+async def zefd_btn_handler(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[1]
+    if val == "manual":
+        await callback.message.edit_text("Kunlik maqsadni raqamda yozing:")
+        return
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'daily_target': int(val)}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', callback.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await callback.message.edit_text(f"✅ Kunlik maqsad {val} ga yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.message(StateFilter(EditDhikrField.daily))
+async def zefd_msg_handler(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Iltimos, faqat raqam kiriting.")
+        return
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'daily_target': int(message.text)}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', message.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await message.answer(f"✅ Kunlik maqsad {message.text} ga yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("zef_global_"))
+async def zef_global_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    await state.update_data(dhikr_id=dhikr_id)
+    await state.set_state(EditDhikrField.global_t)
+    await callback.message.edit_text(
+        "🌍 Yangi umumiy maqsadni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="10,000", callback_data="zefg_10000"),
+             InlineKeyboardButton(text="40,000", callback_data="zefg_40000")],
+            [InlineKeyboardButton(text="100,000", callback_data="zefg_100000"),
+             InlineKeyboardButton(text="1,000,000", callback_data="zefg_1000000")],
+            [InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data="zefg_manual")]
+        ])
+    )
+
+
+@dp.callback_query(StateFilter(EditDhikrField.global_t), F.data.startswith("zefg_"))
+async def zefg_btn_handler(callback: types.CallbackQuery, state: FSMContext):
+    val = callback.data.split("_")[1]
+    if val == "manual":
+        await callback.message.edit_text("Umumiy maqsadni raqamda yozing:")
+        return
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'global_target': int(val)}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', callback.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await callback.message.edit_text(f"✅ Umumiy maqsad yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.message(StateFilter(EditDhikrField.global_t))
+async def zefg_msg_handler(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Iltimos, faqat raqam kiriting.")
+        return
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'global_target': int(message.text)}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', message.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await message.answer(f"✅ Umumiy maqsad yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("zef_arabic_"))
+async def zef_arabic_handler(callback: types.CallbackQuery, state: FSMContext):
+    dhikr_id = int(callback.data.split("_")[2])
+    await state.update_data(dhikr_id=dhikr_id)
+    await state.set_state(EditDhikrField.arabic)
+    
+    d = supabase.table('dhikrs').select('arabic').eq('id', dhikr_id).execute()
+    current = d.data[0].get('arabic', '') if d.data else ''
+    current_text = current if current else 'Kiritilmagan'
+    
+    await callback.message.edit_text(
+        f"📜 Hozirgi arabcha:\n<blockquote>{current_text}</blockquote>\n\n"
+        f"Yangi arabcha matnini yozing yoki /skip bosing.",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(StateFilter(EditDhikrField.arabic), Command("skip"))
+async def zef_arabic_skip(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', message.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await message.answer("⏭ O'tkazildi.\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.message(StateFilter(EditDhikrField.arabic))
+async def zef_arabic_save(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    supabase.table('dhikrs').update({'arabic': message.text}).eq('id', data['dhikr_id']).execute()
+    await state.clear()
+    
+    idx = data.get('dhikr_index', 0)
+    response = supabase.table('dhikrs').select('*').eq('user_id', message.from_user.id).order('id').execute()
+    text, keyboard = build_dhikr_card(response.data or [], idx)
+    await message.answer("✅ Arabcha yangilandi!\n\n" + text, reply_markup=keyboard, parse_mode="HTML")
+
+
+
+@dp.callback_query(F.data == "noop")
+async def noop_handler(callback: types.CallbackQuery):
+    await callback.answer()
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main_handler(callback: types.CallbackQuery):
@@ -773,11 +1115,33 @@ async def view_duas_handler(callback: types.CallbackQuery):
             )])
     
     keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi duo qo'shish", callback_data="add_custom_dua")])
-    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")])
+    keyboard_buttons.append([InlineKeyboardButton(text="📤 Barcha duolarni yuborish", callback_data="send_all_duas")])
+    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_main")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-
+@dp.callback_query(F.data == "send_all_duas")
+async def send_all_duas_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    duas = get_active_duas(user_id)
+    
+    if not duas:
+        await callback.answer("Hozircha faol duolar yo'q.", show_alert=True)
+        return
+        
+    await callback.message.delete()
+    
+    msg = await callback.message.answer("📤 <b>Barcha duolarni yuborish boshlandi...</b>\n\nIltimos kuting.", parse_mode="HTML")
+    
+    for idx, d in enumerate(duas, 1):
+        text = format_dua_message(d, idx, len(duas))
+        await callback.message.answer(text, parse_mode="HTML")
+        await asyncio.sleep(0.5)  # Telegram limitiga tushmaslik uchun
+        
+    await msg.edit_text("✅ <b>Barcha duolar yuborildi!</b>\n\nYuqoriga qaytib o'qishingiz mumkin.", parse_mode="HTML")
+    
+    # Ro'yxatni yana ko'rsatish
+    await view_duas_handler(callback)
 
 @dp.callback_query(F.data == "noop")
 async def noop_handler(callback: types.CallbackQuery):
@@ -1439,7 +1803,7 @@ async def render_log_dhikr(target, dhikr_id, user_id):
         [InlineKeyboardButton(text="✍️ Boshqa raqam yozish", callback_data=f"log_custom_{dhikr_id}")],
         [
             InlineKeyboardButton(text="⬅️ Boshqa zikrni tanlash", callback_data="start_action_now"),
-            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="main_menu")
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="back_to_main")
         ]
     ])
     

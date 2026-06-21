@@ -51,3 +51,9 @@ CREATE INDEX IF NOT EXISTS idx_user_reminders_type ON user_reminders(type);
 -- 6. RLS xavfsizligini o'chirish (Bot ma'lumot yoza olishi uchun)
 ALTER TABLE duas DISABLE ROW LEVEL SECURITY;
 ALTER TABLE prayer_cache DISABLE ROW LEVEL SECURITY;
+
+-- 7. Dhikrlar jadvaliga arabcha ustun
+ALTER TABLE dhikrs ADD COLUMN IF NOT EXISTS arabic text DEFAULT '';
+
+-- 8. Duo'lar jadvaliga ma'no ustuni
+ALTER TABLE duas ADD COLUMN IF NOT EXISTS meaning text DEFAULT '';
