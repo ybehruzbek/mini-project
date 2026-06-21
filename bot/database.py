@@ -114,15 +114,26 @@ def delete_dua(dua_id):
     """Duo o'chirish"""
     supabase.table("duas").delete().eq("id", dua_id).execute()
 
-def add_custom_dua(user_id, text, category="custom"):
+def add_custom_dua(user_id, text, category="custom", arabic=""):
     """Yangi maxsus duo qo'shish"""
     supabase.table("duas").insert({
         "user_id": user_id,
         "text": text,
-        "arabic": "",
+        "arabic": arabic,
         "category": category,
         "is_active": True
     }).execute()
+
+def update_dua(dua_id, updates):
+    """Duo ma'lumotlarini yangilash (arabic, text)"""
+    supabase.table("duas").update(updates).eq("id", dua_id).execute()
+
+def get_dua_by_id(dua_id):
+    """Bitta duo'ni ID bo'yicha olish"""
+    response = supabase.table("duas").select("*").eq("id", dua_id).execute()
+    if response.data and len(response.data) > 0:
+        return response.data[0]
+    return None
 
 # --- Namoz vaqtlari cache ---
 

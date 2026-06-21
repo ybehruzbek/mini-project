@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from database import (
     init_db, save_user_data, add_default_dhikr, get_user, get_user_full,
     supabase, add_default_duas, get_user_duas, get_active_duas,
-    toggle_dua, delete_dua, add_custom_dua,
+    toggle_dua, delete_dua, add_custom_dua, update_dua, get_dua_by_id,
     get_cached_prayer_times, save_prayer_cache, get_users_by_city, get_all_active_cities
 )
 from prayer import (
@@ -41,7 +41,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=9"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=10"
 
 # ==========================================
 # --- FSM States ---
@@ -73,7 +73,13 @@ class SettingsState(StatesGroup):
 
 class DuaState(StatesGroup):
     text = State()
+    arabic = State()
     category = State()
+
+class EditDuaState(StatesGroup):
+    dua_id = State()
+    arabic = State()
+    text = State()
 
 
 # ==========================================
@@ -578,7 +584,7 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
 
 
 # ==========================================
-# --- Duo'lar tizimi ---
+# --- Duo'lar tizimi (Pagination) ---
 # ==========================================
 
 DUA_CATEGORY_NAMES = {
@@ -590,13 +596,75 @@ DUA_CATEGORY_NAMES = {
     "custom": "✍️ Shaxsiy duolar",
 }
 
+DUA_CATEGORY_ORDER = ["morning", "evening", "pre_prayer", "bedtime", "general", "custom"]
+
+def build_dua_card(duas, index, category):
+    """Bitta duo'ni karta ko'rinishida yaratish"""
+    total = len(duas)
+    if total == 0:
+        return None, None
+    
+    idx = index % total
+    dua = duas[idx]
+    cat_name = DUA_CATEGORY_NAMES.get(category, category)
+    status = "✅ Faol" if dua.get('is_active', True) else "❌ Nofaol"
+    
+    text = f"{cat_name}  ({idx + 1} / {total})\n"
+    text += "━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # Arabcha matni
+    arabic = dua.get('arabic', '')
+    if arabic and arabic.strip():
+        text += f"📜 <b>Arabcha:</b>\n<blockquote>{arabic}</blockquote>\n\n"
+    
+    # O'qilishi / Ma'nosi
+    dua_text = dua.get('text', '')
+    if dua_text:
+        text += f"📝 <b>O'qilishi:</b>\n{dua_text}\n\n"
+    
+    text += f"Holati: {status}\n"
+    
+    # Keyboard
+    buttons = []
+    
+    # Navigatsiya qatori
+    nav_row = []
+    if total > 1:
+        prev_idx = (idx - 1) % total
+        next_idx = (idx + 1) % total
+        nav_row.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"dua_page_{category}_{prev_idx}"))
+        nav_row.append(InlineKeyboardButton(text=f"{idx + 1}/{total}", callback_data="noop"))
+        nav_row.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"dua_page_{category}_{next_idx}"))
+    else:
+        nav_row.append(InlineKeyboardButton(text=f"1/1", callback_data="noop"))
+    buttons.append(nav_row)
+    
+    # Faollik toggle
+    if dua.get('is_active', True):
+        buttons.append([InlineKeyboardButton(text="❌ Web-appda yashirish", callback_data=f"dua_off_{category}_{idx}_{dua['id']}")])
+    else:
+        buttons.append([InlineKeyboardButton(text="✅ Web-appda ko'rsatish", callback_data=f"dua_on_{category}_{idx}_{dua['id']}")])
+    
+    # Tahrirlash va o'chirish (faqat custom)
+    action_row = []
+    action_row.append(InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"dua_edit_{category}_{idx}_{dua['id']}"))
+    if category == "custom":
+        action_row.append(InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"dua_del_{category}_{idx}_{dua['id']}"))
+    buttons.append(action_row)
+    
+    # Orqaga
+    buttons.append([InlineKeyboardButton(text="⬅️ Kategoriyalar", callback_data="view_duas")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return text, keyboard
+
+
 @dp.callback_query(F.data == "view_duas")
 async def view_duas_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     duas = get_user_duas(user_id)
     
     if not duas:
-        # Default duolarni qo'shish
         add_default_duas(user_id)
         duas = get_user_duas(user_id)
     
@@ -612,130 +680,317 @@ async def view_duas_handler(callback: types.CallbackQuery):
     
     total = len(duas)
     active = sum(1 for d in duas if d.get('is_active', True))
-    text += f"Jami: {total} ta duo | Faol: {active} ta\n\n"
+    text += f"📊 Jami: <b>{total}</b> ta duo | Faol: <b>{active}</b> ta\n\n"
     
-    for cat, cat_duas in categories.items():
-        cat_name = DUA_CATEGORY_NAMES.get(cat, cat)
-        active_count = sum(1 for d in cat_duas if d.get('is_active', True))
-        text += f"{cat_name}: {active_count}/{len(cat_duas)} ta\n"
+    for cat_key in DUA_CATEGORY_ORDER:
+        if cat_key in categories:
+            cat_duas = categories[cat_key]
+            cat_name = DUA_CATEGORY_NAMES.get(cat_key, cat_key)
+            active_count = sum(1 for d in cat_duas if d.get('is_active', True))
+            text += f"{cat_name}: <b>{active_count}</b>/{len(cat_duas)} ta\n"
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌅 Tonggi duolar", callback_data="duas_cat_morning")],
-        [InlineKeyboardButton(text="🌙 Kechki duolar", callback_data="duas_cat_evening")],
-        [InlineKeyboardButton(text="🕌 Namoz oldidan", callback_data="duas_cat_pre_prayer")],
-        [InlineKeyboardButton(text="🛏 Uxlashdan oldin", callback_data="duas_cat_bedtime")],
-        [InlineKeyboardButton(text="📿 Umumiy duolar", callback_data="duas_cat_general")],
-        [InlineKeyboardButton(text="✍️ Shaxsiy duolar", callback_data="duas_cat_custom")],
-        [InlineKeyboardButton(text="➕ Yangi duo qo'shish", callback_data="add_custom_dua")],
-        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")]
-    ])
+    keyboard_buttons = []
+    for cat_key in DUA_CATEGORY_ORDER:
+        if cat_key in categories:
+            cat_name = DUA_CATEGORY_NAMES.get(cat_key, cat_key)
+            count = len(categories[cat_key])
+            keyboard_buttons.append([InlineKeyboardButton(
+                text=f"{cat_name} ({count})",
+                callback_data=f"dua_page_{cat_key}_0"
+            )])
     
+    keyboard_buttons.append([InlineKeyboardButton(text="➕ Yangi duo qo'shish", callback_data="add_custom_dua")])
+    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("duas_cat_"))
-async def duas_category_handler(callback: types.CallbackQuery):
-    category = callback.data[9:]  # "duas_cat_morning" → "morning"
-    user_id = callback.from_user.id
+
+@dp.callback_query(F.data == "noop")
+async def noop_handler(callback: types.CallbackQuery):
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("dua_page_"))
+async def dua_page_handler(callback: types.CallbackQuery):
+    """Duo kartasini ko'rsatish: dua_page_{category}_{index}"""
+    parts = callback.data.split("_")
+    # dua_page_morning_0 → ['dua', 'page', 'morning', '0']
+    # dua_page_pre_prayer_0 → ['dua', 'page', 'pre', 'prayer', '0']
+    category = "_".join(parts[2:-1])
+    index = int(parts[-1])
     
+    user_id = callback.from_user.id
     duas = get_user_duas(user_id, category)
-    cat_name = DUA_CATEGORY_NAMES.get(category, category)
     
     if not duas:
-        text = f"{cat_name}\n\nBu kategoriyada hali duo yo'q."
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Duo qo'shish", callback_data="add_custom_dua")],
-            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")]
-        ])
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        cat_name = DUA_CATEGORY_NAMES.get(category, category)
+        await callback.message.edit_text(
+            f"{cat_name}\n\nBu kategoriyada hali duo yo'q.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Duo qo'shish", callback_data="add_custom_dua")],
+                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")]
+            ])
+        )
         return
     
-    text = f"{cat_name}\n\n"
-    keyboard_buttons = []
-    
-    for idx, d in enumerate(duas[:10], 1):  # max 10 ta ko'rsatish
-        status = "✅" if d.get('is_active', True) else "❌"
-        dua_text = d['text'][:50] + "..." if len(d['text']) > 50 else d['text']
-        text += f"{idx}. {status} {dua_text}\n\n"
-        
-        row = []
-        if d.get('is_active', True):
-            row.append(InlineKeyboardButton(text=f"❌ {idx}-o'chirish", callback_data=f"dua_off_{d['id']}"))
-        else:
-            row.append(InlineKeyboardButton(text=f"✅ {idx}-yoqish", callback_data=f"dua_on_{d['id']}"))
-        
-        if category == "custom":
-            row.append(InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"dua_del_{d['id']}"))
-        
-        keyboard_buttons.append(row)
-    
-    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    text, keyboard = build_dua_card(duas, index, category)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Toggle: Faol/Nofaol → kartaga qaytish ---
 
 @dp.callback_query(F.data.startswith("dua_on_"))
 async def dua_toggle_on_handler(callback: types.CallbackQuery):
-    dua_id = int(callback.data[7:])
+    """dua_on_{category}_{index}_{dua_id}"""
+    parts = callback.data.split("_")
+    dua_id = int(parts[-1])
+    index = int(parts[-2])
+    category = "_".join(parts[2:-2])
+    
     toggle_dua(dua_id, True)
     await callback.answer("✅ Duo faollashtirildi!")
-    await view_duas_handler(callback)
+    
+    # Kartani qayta ko'rsatish
+    user_id = callback.from_user.id
+    duas = get_user_duas(user_id, category)
+    text, keyboard = build_dua_card(duas, index, category)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
 
 @dp.callback_query(F.data.startswith("dua_off_"))
 async def dua_toggle_off_handler(callback: types.CallbackQuery):
-    dua_id = int(callback.data[8:])
+    """dua_off_{category}_{index}_{dua_id}"""
+    parts = callback.data.split("_")
+    dua_id = int(parts[-1])
+    index = int(parts[-2])
+    category = "_".join(parts[2:-2])
+    
     toggle_dua(dua_id, False)
-    await callback.answer("❌ Duo o'chirildi!")
-    await view_duas_handler(callback)
+    await callback.answer("❌ Duo nofaol qilindi!")
+    
+    user_id = callback.from_user.id
+    duas = get_user_duas(user_id, category)
+    text, keyboard = build_dua_card(duas, index, category)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Delete → kartaga qaytish ---
 
 @dp.callback_query(F.data.startswith("dua_del_"))
 async def dua_delete_handler(callback: types.CallbackQuery):
-    dua_id = int(callback.data[8:])
+    """dua_del_{category}_{index}_{dua_id}"""
+    parts = callback.data.split("_")
+    dua_id = int(parts[-1])
+    index = int(parts[-2])
+    category = "_".join(parts[2:-2])
+    
     delete_dua(dua_id)
     await callback.answer("🗑 Duo o'chirib tashlandi!")
-    await view_duas_handler(callback)
+    
+    user_id = callback.from_user.id
+    duas = get_user_duas(user_id, category)
+    
+    if not duas:
+        await callback.message.edit_text(
+            f"{DUA_CATEGORY_NAMES.get(category, category)}\n\nBu kategoriyada duo qolmadi.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Duo qo'shish", callback_data="add_custom_dua")],
+                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")]
+            ])
+        )
+        return
+    
+    new_index = min(index, len(duas) - 1)
+    text, keyboard = build_dua_card(duas, new_index, category)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
-# --- Yangi duo qo'shish ---
+
+# --- B-variant Tahrirlash (Bosqichma-bosqich: arabcha → ma'no) ---
+
+@dp.callback_query(F.data.startswith("dua_edit_"))
+async def dua_edit_start_handler(callback: types.CallbackQuery, state: FSMContext):
+    """dua_edit_{category}_{index}_{dua_id}"""
+    parts = callback.data.split("_")
+    dua_id = int(parts[-1])
+    index = int(parts[-2])
+    category = "_".join(parts[2:-2])
+    
+    dua = get_dua_by_id(dua_id)
+    if not dua:
+        await callback.answer("Duo topilmadi!", show_alert=True)
+        return
+    
+    await state.set_state(EditDuaState.arabic)
+    await state.update_data(dua_id=dua_id, category=category, index=index)
+    
+    current_arabic = dua.get('arabic', '') or 'Kiritilmagan'
+    
+    await callback.message.edit_text(
+        f"✏️ <b>Duo tahrirlash</b> (1/2)\n\n"
+        f"Hozirgi arabcha:\n<blockquote>{current_arabic}</blockquote>\n\n"
+        f"Yangi arabcha matnini yuboring.\n"
+        f"Yoki o'zgartirishsiz qoldirish uchun /skip buyrug'ini bosing.",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(StateFilter(EditDuaState.arabic), Command("skip"))
+async def edit_dua_skip_arabic(message: types.Message, state: FSMContext):
+    """Arabchani o'tkazib yuborish"""
+    data = await state.get_data()
+    dua = get_dua_by_id(data['dua_id'])
+    current_text = dua.get('text', '') if dua else 'Kiritilmagan'
+    
+    await state.set_state(EditDuaState.text)
+    await message.answer(
+        f"✏️ <b>Duo tahrirlash</b> (2/2)\n\n"
+        f"Hozirgi o'qilishi:\n<blockquote>{current_text}</blockquote>\n\n"
+        f"Yangi matnni yuboring yoki /skip bosing.",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(StateFilter(EditDuaState.arabic))
+async def edit_dua_arabic(message: types.Message, state: FSMContext):
+    """Yangi arabcha matnini qabul qilish"""
+    await state.update_data(new_arabic=message.text)
+    
+    data = await state.get_data()
+    dua = get_dua_by_id(data['dua_id'])
+    current_text = dua.get('text', '') if dua else 'Kiritilmagan'
+    
+    await state.set_state(EditDuaState.text)
+    await message.answer(
+        f"✅ Arabcha yangilandi!\n\n"
+        f"✏️ <b>Duo tahrirlash</b> (2/2)\n\n"
+        f"Hozirgi o'qilishi:\n<blockquote>{current_text}</blockquote>\n\n"
+        f"Yangi matnni yuboring yoki /skip bosing.",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(StateFilter(EditDuaState.text), Command("skip"))
+async def edit_dua_skip_text(message: types.Message, state: FSMContext):
+    """Ma'noni o'tkazib yuborish va saqlash"""
+    data = await state.get_data()
+    
+    updates = {}
+    if 'new_arabic' in data:
+        updates['arabic'] = data['new_arabic']
+    
+    if updates:
+        update_dua(data['dua_id'], updates)
+    
+    await state.clear()
+    
+    category = data.get('category', 'custom')
+    index = data.get('index', 0)
+    user_id = message.from_user.id
+    duas = get_user_duas(user_id, category)
+    
+    text_msg, keyboard = build_dua_card(duas, index, category)
+    await message.answer("✅ Duo yangilandi!\n\n" + text_msg, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.message(StateFilter(EditDuaState.text))
+async def edit_dua_text(message: types.Message, state: FSMContext):
+    """Yangi matnni qabul qilish va saqlash"""
+    data = await state.get_data()
+    
+    updates = {'text': message.text}
+    if 'new_arabic' in data:
+        updates['arabic'] = data['new_arabic']
+    
+    update_dua(data['dua_id'], updates)
+    await state.clear()
+    
+    category = data.get('category', 'custom')
+    index = data.get('index', 0)
+    user_id = message.from_user.id
+    duas = get_user_duas(user_id, category)
+    
+    text_msg, keyboard = build_dua_card(duas, index, category)
+    await message.answer("✅ Duo muvaffaqiyatli yangilandi!\n\n" + text_msg, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Yangi duo qo'shish (B-variant: arabcha → matn → kategoriya) ---
 
 @dp.callback_query(F.data == "add_custom_dua")
 async def add_custom_dua_handler(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "✍️ Yangi duo matnini yozing:\n\n"
+        "✍️ <b>Yangi duo qo'shish</b> (1/3)\n\n"
+        "Duo'ning <b>arabcha</b> matnini yozing.\n"
+        "Yoki arabchasi bo'lmasa /skip bosing.",
+        parse_mode="HTML"
+    )
+    await state.set_state(DuaState.arabic)
+
+
+@dp.message(StateFilter(DuaState.arabic), Command("skip"))
+async def process_new_dua_skip_arabic(message: types.Message, state: FSMContext):
+    await state.update_data(arabic="")
+    await message.answer(
+        "✍️ <b>Yangi duo qo'shish</b> (2/3)\n\n"
+        "Duo'ning <b>o'qilishi yoki ma'nosini</b> yozing:\n\n"
         "<i>Masalan: Allohumma inni as'aluka al-jannah</i>",
         parse_mode="HTML"
     )
     await state.set_state(DuaState.text)
+
+
+@dp.message(StateFilter(DuaState.arabic))
+async def process_new_dua_arabic(message: types.Message, state: FSMContext):
+    await state.update_data(arabic=message.text)
+    await message.answer(
+        "✅ Arabcha saqlandi!\n\n"
+        "✍️ <b>Yangi duo qo'shish</b> (2/3)\n\n"
+        "Endi duo'ning <b>o'qilishi yoki ma'nosini</b> yozing:",
+        parse_mode="HTML"
+    )
+    await state.set_state(DuaState.text)
+
 
 @dp.message(StateFilter(DuaState.text))
 async def process_dua_text(message: types.Message, state: FSMContext):
     await state.update_data(text=message.text)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌅 Tonggi", callback_data="dua_cat_morning")],
-        [InlineKeyboardButton(text="🌙 Kechki", callback_data="dua_cat_evening")],
-        [InlineKeyboardButton(text="🕌 Namoz oldidan", callback_data="dua_cat_pre_prayer")],
-        [InlineKeyboardButton(text="🛏 Uxlashdan oldin", callback_data="dua_cat_bedtime")],
-        [InlineKeyboardButton(text="📿 Umumiy", callback_data="dua_cat_general")],
-        [InlineKeyboardButton(text="✍️ Shaxsiy", callback_data="dua_cat_custom")],
+        [InlineKeyboardButton(text="🌅 Tonggi", callback_data="newdua_cat_morning"),
+         InlineKeyboardButton(text="🌙 Kechki", callback_data="newdua_cat_evening")],
+        [InlineKeyboardButton(text="🕌 Namoz oldidan", callback_data="newdua_cat_pre_prayer"),
+         InlineKeyboardButton(text="🛏 Uxlashdan oldin", callback_data="newdua_cat_bedtime")],
+        [InlineKeyboardButton(text="📿 Umumiy", callback_data="newdua_cat_general"),
+         InlineKeyboardButton(text="✍️ Shaxsiy", callback_data="newdua_cat_custom")],
     ])
     
     await message.answer(
+        "✍️ <b>Yangi duo qo'shish</b> (3/3)\n\n"
         "Bu duo qaysi kategoriyaga tegishli?",
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="HTML"
     )
     await state.set_state(DuaState.category)
 
-@dp.callback_query(StateFilter(DuaState.category), F.data.startswith("dua_cat_"))
+
+@dp.callback_query(StateFilter(DuaState.category), F.data.startswith("newdua_cat_"))
 async def process_dua_category(callback: types.CallbackQuery, state: FSMContext):
-    category = callback.data[8:]  # "dua_cat_morning" → "morning"
+    category = callback.data[11:]  # "newdua_cat_morning" → "morning"
     data = await state.get_data()
     
-    add_custom_dua(callback.from_user.id, data['text'], category)
+    add_custom_dua(
+        callback.from_user.id,
+        data['text'],
+        category,
+        arabic=data.get('arabic', '')
+    )
     
     await state.clear()
     
     cat_name = DUA_CATEGORY_NAMES.get(category, category)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🤲 Duo'larga qaytish", callback_data="view_duas")],
+        [InlineKeyboardButton(text=f"📖 {cat_name}ni ko'rish", callback_data=f"dua_page_{category}_0")],
+        [InlineKeyboardButton(text="🤲 Barcha duo'lar", callback_data="view_duas")],
         [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="main_menu")]
     ])
     

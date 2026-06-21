@@ -13,563 +13,454 @@
 
     <style>
         :root {
-            --bg-color: #f8fafc;
-            --text-color: #0f172a;
-            --card-bg: #ffffff;
+            --bg: #f8fafc;
+            --text: #0f172a;
+            --card: #ffffff;
             --accent: #10b981;
             --accent-dim: rgba(16, 185, 129, 0.1);
             --border: #e2e8f0;
             --secondary: #6366f1;
             --secondary-dim: rgba(99, 102, 241, 0.1);
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --muted: #94a3b8;
         }
 
         body.dark-theme {
-            --bg-color: #0f172a;
-            --text-color: #f8fafc;
-            --card-bg: #1e293b;
+            --bg: #0f172a;
+            --text: #f8fafc;
+            --card: #1e293b;
             --accent: #34d399;
             --accent-dim: rgba(52, 211, 153, 0.1);
             --border: #334155;
             --secondary: #818cf8;
             --secondary-dim: rgba(129, 140, 248, 0.1);
+            --muted: #64748b;
         }
 
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             user-select: none;
             -webkit-user-select: none;
             touch-action: manipulation;
             overflow: hidden;
-        }
-
-        /* Views */
-        .view-container {
-            display: none;
             height: 100vh;
-            padding-bottom: 110px;
-            overflow-y: auto;
-            animation: fadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        
-        .view-container.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .view-container > * {
-            flex-shrink: 0;
         }
 
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(12px) scale(0.98); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
+        .view { display: none; height: 100vh; padding-bottom: 110px; overflow-y: auto; flex-direction: column; }
+        .view.active { display: flex; animation: viewIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .view > * { flex-shrink: 0; }
+        @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* Apple Fitness Ring */
-        .ring-circle {
-            transition: stroke-dashoffset 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-            transform: rotate(-90deg);
-            transform-origin: 50% 50%;
-        }
+        /* Ring */
+        .ring-circle { transition: stroke-dashoffset 0.3s ease; transform: rotate(-90deg); transform-origin: 50% 50%; }
+        .tap-area { transition: transform 0.06s ease; }
+        .tap-area:active { transform: scale(0.93); }
 
-        /* Tap Effect */
-        .tap-area {
-            transition: transform 0.08s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .tap-area:active {
-            transform: scale(0.94);
-        }
-
-        /* Success pulse on goal reached */
-        @keyframes successPulse {
+        @keyframes goalPulse {
             0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-            70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
+            70% { box-shadow: 0 0 0 24px rgba(16, 185, 129, 0); }
             100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-        .goal-reached { animation: successPulse 1s ease-out; }
+        .goal-pulse { animation: goalPulse 1s ease-out; }
 
-        /* Confetti burst effect */
-        @keyframes confettiBurst {
+        @keyframes burstRing {
             0% { transform: scale(0); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.8; }
             100% { transform: scale(1.5); opacity: 0; }
         }
-        .confetti-burst {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            border: 3px solid var(--accent);
-            animation: confettiBurst 0.6s ease-out forwards;
-            pointer-events: none;
-        }
+        .burst-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 3px solid var(--accent); animation: burstRing 0.6s ease-out forwards; pointer-events: none; }
 
-        /* Bottom Nav - Floating Pill */
-        .glass-nav-container {
-            position: fixed;
-            bottom: 24px;
-            left: 0;
-            width: 100%;
-            padding: 0 24px;
-            z-index: 50;
-            pointer-events: none;
-            display: flex;
-            justify-content: center;
+        /* Nav */
+        .nav-wrap { position: fixed; bottom: 20px; left: 0; width: 100%; padding: 0 20px; z-index: 50; pointer-events: none; display: flex; justify-content: center; }
+        .nav-pill {
+            background: rgba(255,255,255,0.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.5); box-shadow: 0 8px 32px -8px rgba(0,0,0,0.12);
+            border-radius: 40px; height: 68px; width: 100%; max-width: 380px;
+            display: flex; justify-content: space-around; align-items: center; pointer-events: auto;
         }
+        body.dark-theme .nav-pill { background: rgba(30,41,59,0.9); border-color: rgba(255,255,255,0.08); box-shadow: 0 8px 32px -8px rgba(0,0,0,0.5); }
+        .nav-btn { color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 60px; cursor: pointer; transition: all 0.2s; position: relative; background: none; border: none; }
+        .nav-btn.active { color: var(--accent); }
+        .nav-btn.active::after { content: ''; position: absolute; bottom: -4px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
-        .glass-nav {
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.12), 0 2px 8px -2px rgba(0, 0, 0, 0.06);
-            border-radius: 40px;
-            height: 72px;
-            width: 100%;
-            max-width: 400px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0 16px;
-            pointer-events: auto;
-        }
+        /* Card */
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        .card-press:active { transform: scale(0.98); transition: transform 0.15s; }
 
-        body.dark-theme .glass-nav {
-            background: rgba(30, 41, 59, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5);
-        }
+        /* Skeleton */
+        .skel { background: linear-gradient(90deg, var(--border) 25%, var(--bg) 50%, var(--border) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 8px; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        .nav-item {
-            color: #94a3b8;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            width: 64px;
-            cursor: pointer;
-        }
+        /* Progress */
+        .progress-track { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
 
-        .nav-item.active {
-            color: var(--accent);
-            transform: translateY(-2px);
-        }
+        /* Next prayer */
+        .next-prayer { background: var(--accent-dim); border-left: 3px solid var(--accent); }
 
-        .nav-item.active::after {
-            content: '';
-            position: absolute;
-            bottom: -6px;
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: var(--accent);
-        }
+        /* Chart */
+        .chart-bar { transition: height 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
-        /* Glass Cards */
-        .glass-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
+        /* Heat map */
+        .heat-cell { width: 100%; aspect-ratio: 1; border-radius: 3px; transition: background 0.3s; cursor: pointer; }
 
-        .glass-card-interactive:active {
-            transform: scale(0.98);
-        }
+        /* Segment control */
+        .seg-ctrl { display: flex; background: var(--border); border-radius: 10px; padding: 3px; }
+        .seg-btn { flex: 1; text-align: center; padding: 6px 0; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: all 0.2s; border: none; background: none; }
+        .seg-btn.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
-        /* Skeleton Loading */
-        .skeleton {
-            background: linear-gradient(90deg, var(--border) 25%, var(--bg-color) 50%, var(--border) 75%);
-            background-size: 200% 100%;
-            animation: shimmer 1.5s infinite;
-            border-radius: 8px;
-        }
+        /* Misc */
+        .tabular { font-variant-numeric: tabular-nums; }
+        .arabic { font-family: 'Traditional Arabic', 'Amiri', serif; line-height: 2; }
+        .glow-gold { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3), 0 0 12px rgba(245, 158, 11, 0.15); }
 
-        @keyframes shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
+        /* Bottom sheet */
+        .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+        .sheet-overlay.open { opacity: 1; pointer-events: auto; }
+        .sheet-panel { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); border-radius: 24px 24px 0 0; z-index: 61; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); max-height: 70vh; overflow-y: auto; }
+        .sheet-panel.open { transform: translateY(0); }
+        .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 10px auto; }
 
-        /* Prayer time highlight (next prayer) */
-        .next-prayer {
-            background: var(--accent-dim);
-            border-left: 3px solid var(--accent);
-        }
-
-        /* Progress bar for dhikr cards */
-        .dhikr-progress {
-            height: 3px;
-            border-radius: 2px;
-            background: var(--border);
-            overflow: hidden;
-        }
-        .dhikr-progress-fill {
-            height: 100%;
-            border-radius: 2px;
-            background: var(--accent);
-            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        /* Chart bar animation */
-        .chart-bar {
-            transition: height 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        /* Arabic text styling */
-        .arabic-text {
-            font-family: 'Traditional Arabic', 'Scheherazade New', 'Amiri', serif;
-            line-height: 2;
-            letter-spacing: 0.5px;
-        }
-
-        /* Smooth number counter */
-        .tabular-nums { font-variant-numeric: tabular-nums; }
+        /* Toggle */
+        .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
+        .toggle input { display: none; }
+        .toggle-track { width: 100%; height: 100%; border-radius: 12px; background: var(--border); transition: background 0.2s; }
+        .toggle input:checked + .toggle-track { background: var(--accent); }
+        .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: white; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
     </style>
 </head>
 
-<body class="h-screen w-screen flex flex-col justify-between">
-
-    <!-- MAIN CONTENT AREA -->
-    <main class="flex-1 relative w-full h-full">
-
-        <!-- =================== TASBEH VIEW =================== -->
-        <div id="view-tasbeh" class="view-container active w-full h-full items-center justify-between pt-10">
-            <!-- Header -->
-            <div class="w-full px-8 flex flex-col items-center">
-                <div class="px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide mb-3"
-                    style="background: var(--accent-dim); color: var(--accent);">BUGUNGI MAQSAD</div>
-                <h1 id="dhikr-title" class="text-3xl font-bold tracking-tight text-center leading-tight">...</h1>
-                <p class="text-sm font-medium opacity-60 mt-2 flex items-center gap-2">
-                    <i class="ph ph-target"></i> <span id="target-count">--</span> marta
-                </p>
-            </div>
-
-            <!-- Fitness Ring -->
-            <div class="flex-1 flex flex-col items-center justify-center w-full relative">
-                <div id="tap-area" class="w-72 h-72 relative tap-area rounded-full cursor-pointer touch-manipulation">
-                    <svg class="w-72 h-72 drop-shadow-lg absolute inset-0" viewBox="0 0 100 100">
-                        <!-- Background Ring -->
-                        <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"
-                            opacity="0.3" />
-                        <!-- Progress Ring -->
-                        <circle id="progress-ring" class="ring-circle" cx="50" cy="50" r="44" fill="none"
-                            stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="276.46"
-                            stroke-dashoffset="276.46" />
-                    </svg>
-                    <!-- Counter -->
-                    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span id="counter" class="text-7xl font-bold tracking-tighter tabular-nums">0</span>
-                        <span id="counter-label" class="text-xs font-semibold opacity-40 mt-1 uppercase tracking-widest hidden">maqsadga yetdingiz! ✨</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Global Progress Mini -->
-            <div id="global-progress-bar" class="w-full px-10 mb-3 hidden">
-                <div class="flex justify-between items-center mb-1">
-                    <span class="text-[10px] font-semibold opacity-40 uppercase tracking-widest">Umumiy</span>
-                    <span id="global-progress-text" class="text-[10px] font-bold opacity-50 tabular-nums">0 / 0</span>
-                </div>
-                <div class="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                    <div id="global-progress-fill" class="h-full rounded-full transition-all duration-500" style="width: 0%; background: var(--secondary);"></div>
-                </div>
-            </div>
-
-            <!-- Controls -->
-            <div class="w-full px-10 flex justify-between items-center pb-4">
-                <button id="reset-btn"
-                    class="w-14 h-14 flex items-center justify-center rounded-2xl glass-card text-red-500 active:scale-95 transition-transform shadow-sm">
-                    <i class="ph ph-arrow-counter-clockwise text-2xl"></i>
-                </button>
-                <button id="save-btn"
-                    class="flex-1 ml-4 h-14 rounded-2xl text-white font-bold text-lg active:scale-95 transition-transform shadow-lg flex items-center justify-center gap-2"
-                    style="background: var(--accent);">
-                    <i class="ph ph-check-circle text-xl"></i> Saqlash
-                </button>
+<body>
+    <!-- ========== TASBEH ========== -->
+    <div id="v-tasbeh" class="view active w-full items-center justify-between pt-8">
+        <div class="w-full px-8 flex flex-col items-center">
+            <button id="quick-switch-btn" class="px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide mb-2 flex items-center gap-1.5 active:scale-95 transition-transform"
+                style="background: var(--accent-dim); color: var(--accent);">
+                <i class="ph ph-swap text-sm"></i> <span id="dhikr-title-badge">BUGUNGI MAQSAD</span>
+            </button>
+            <h1 id="dhikr-title" class="text-3xl font-bold tracking-tight text-center leading-tight">...</h1>
+            <div class="flex items-center gap-4 mt-2 text-sm font-medium opacity-50">
+                <span class="flex items-center gap-1"><i class="ph ph-target text-xs"></i> <span id="target-count">--</span>/kun</span>
+                <span id="session-timer" class="flex items-center gap-1 hidden"><i class="ph ph-timer text-xs"></i> <span id="session-time">0:00</span></span>
             </div>
         </div>
 
-
-        <!-- =================== ZIKRLAR VIEW =================== -->
-        <div id="view-zikrlar" class="view-container w-full h-full px-6 pt-8">
-            <div class="flex items-center justify-between mb-6">
-                <div>
-                    <h1 class="text-3xl font-bold">Zikrlar</h1>
-                    <p class="text-sm opacity-50 mt-1">O'qimoqchi bo'lgan zikrni tanlang</p>
-                </div>
-                <div id="dhikr-count-badge" class="px-3 py-1 rounded-full text-xs font-bold tabular-nums"
-                    style="background: var(--accent-dim); color: var(--accent);">
-                    0 ta
-                </div>
-            </div>
-
-            <div id="dhikr-list" class="flex flex-col gap-3 pb-10">
-                <!-- Skeletons -->
-                <div class="glass-card p-5 h-24 skeleton"></div>
-                <div class="glass-card p-5 h-24 skeleton"></div>
-            </div>
-        </div>
-
-
-        <!-- =================== STATS VIEW =================== -->
-        <div id="view-stats" class="view-container w-full h-full px-6 pt-8 pb-32">
-            <h1 class="text-3xl font-bold mb-6">Statistika</h1>
-
-            <div class="grid grid-cols-2 gap-3 mb-3">
-                <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center mb-3"
-                        style="background: var(--accent-dim); color: var(--accent);">
-                        <i class="ph ph-calendar-check text-xl"></i>
-                    </div>
-                    <span class="text-[10px] opacity-50 font-bold uppercase tracking-wider">Bugun</span>
-                    <span id="stat-daily" class="text-2xl font-bold mt-1 tabular-nums">0</span>
-                </div>
-                <div class="glass-card p-5 flex flex-col items-center justify-center text-center">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-blue-500/10 text-blue-500">
-                        <i class="ph ph-globe text-xl"></i>
-                    </div>
-                    <span class="text-[10px] opacity-50 font-bold uppercase tracking-wider">Umumiy</span>
-                    <span id="stat-global" class="text-2xl font-bold mt-1 tabular-nums">0</span>
-                </div>
-            </div>
-
-            <!-- Streak and Top Dhikr -->
-            <div class="grid grid-cols-2 gap-3 mb-6">
-                <div class="glass-card p-4 flex flex-col items-center justify-center text-center bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-900/30">
-                    <i class="ph ph-fire text-2xl text-orange-500 mb-1"></i>
-                    <span class="text-[10px] uppercase font-bold tracking-wider opacity-50">Seriya</span>
-                    <span id="stat-streak" class="text-xl font-bold text-orange-600 dark:text-orange-400 mt-0.5 tabular-nums">0 kun</span>
-                </div>
-                <div class="glass-card p-4 flex flex-col items-center justify-center text-center bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-900/30">
-                    <i class="ph ph-trophy text-2xl text-purple-500 mb-1"></i>
-                    <span class="text-[10px] uppercase font-bold tracking-wider opacity-50">Sevimli</span>
-                    <span id="stat-top" class="text-sm font-bold text-purple-600 dark:text-purple-400 mt-1 line-clamp-1 w-full truncate">...</span>
-                </div>
-            </div>
-
-            <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                <i class="ph ph-chart-bar text-[var(--accent)]"></i> Oxirgi 7 kun
-            </h3>
-            <div class="glass-card p-5 mb-10">
-                <!-- Bar Chart Container -->
-                <div id="chart-container" class="flex items-end justify-between h-32 gap-1.5 mt-2">
-                    <div class="skeleton h-10 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-16 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-8 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-24 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-12 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-20 flex-1 rounded-t-md"></div>
-                    <div class="skeleton h-32 flex-1 rounded-t-md"></div>
-                </div>
-                <!-- X-Axis Labels -->
-                <div id="chart-labels"
-                    class="flex justify-between items-center mt-3 text-[10px] font-bold opacity-40 uppercase tracking-wide">
+        <div class="flex-1 flex flex-col items-center justify-center w-full relative">
+            <div id="tap-area" class="w-72 h-72 relative tap-area rounded-full cursor-pointer">
+                <svg class="w-72 h-72 absolute inset-0" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="5" opacity="0.25" />
+                    <circle id="progress-ring" class="ring-circle" cx="50" cy="50" r="44" fill="none"
+                        stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
+                        stroke-dasharray="276.46" stroke-dashoffset="276.46" />
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span id="counter" class="text-7xl font-bold tracking-tighter tabular">0</span>
+                    <span id="counter-label" class="text-[10px] font-bold opacity-40 mt-1 uppercase tracking-widest hidden">maqsadga yetdingiz ✨</span>
+                    <span id="rpm-label" class="text-[10px] font-semibold mt-1 hidden tabular" style="color: var(--secondary);">0 z/m</span>
                 </div>
             </div>
         </div>
 
+        <div id="global-bar" class="w-full px-10 mb-3 hidden">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-[10px] font-bold opacity-30 uppercase tracking-widest">Umumiy</span>
+                <span id="global-text" class="text-[10px] font-bold opacity-40 tabular">0 / 0</span>
+            </div>
+            <div class="progress-track"><div id="global-fill" class="progress-fill" style="width:0%;background:var(--secondary)"></div></div>
+        </div>
 
-        <!-- =================== PROFILE VIEW =================== -->
-        <div id="view-profile" class="view-container w-full h-full px-6 pt-8 pb-32">
-            <h1 class="text-3xl font-bold mb-6">Profil</h1>
+        <div class="w-full px-8 flex gap-3 pb-4">
+            <button id="reset-btn" class="w-14 h-14 flex items-center justify-center rounded-2xl card text-red-400 active:scale-95 transition-transform">
+                <i class="ph ph-arrow-counter-clockwise text-2xl"></i>
+            </button>
+            <button id="save-btn" class="flex-1 h-14 rounded-2xl text-white font-bold text-base active:scale-95 transition-transform shadow-lg flex items-center justify-center gap-2" style="background:var(--accent)">
+                <i class="ph ph-cloud-arrow-up text-xl"></i> Saqlash
+            </button>
+        </div>
+    </div>
 
-            <!-- Profile Card -->
-            <div class="glass-card p-6 flex items-center gap-4 mb-2">
-                <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner"
-                    style="background: var(--accent-dim);">
-                    📿
-                </div>
-                <div class="flex-1">
-                    <h2 id="profile-name" class="text-xl font-bold">...</h2>
-                    <p id="profile-habit" class="text-sm opacity-50 mt-0.5 capitalize">...</p>
+    <!-- ========== ZIKRLAR ========== -->
+    <div id="v-zikrlar" class="view w-full px-5 pt-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h1 class="text-2xl font-bold">Zikrlar</h1>
+                <p class="text-xs opacity-40 mt-0.5">O'qimoqchi bo'lgan zikrni tanlang</p>
+            </div>
+            <div id="dhikr-badge" class="px-3 py-1 rounded-full text-xs font-bold tabular" style="background:var(--accent-dim);color:var(--accent)">0 ta</div>
+        </div>
+
+        <!-- Daily summary ring -->
+        <div id="daily-summary" class="card p-4 mb-4 flex items-center gap-4 hidden">
+            <div class="relative w-14 h-14 flex-shrink-0">
+                <svg class="w-14 h-14" viewBox="0 0 50 50">
+                    <circle cx="25" cy="25" r="20" fill="none" stroke="var(--border)" stroke-width="4" opacity="0.3"/>
+                    <circle id="daily-ring" class="ring-circle" cx="25" cy="25" r="20" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="125.66" stroke-dashoffset="125.66"/>
+                </svg>
+                <span id="daily-pct" class="absolute inset-0 flex items-center justify-center text-[11px] font-extrabold tabular" style="color:var(--accent)">0%</span>
+            </div>
+            <div class="flex-1">
+                <span class="text-xs font-bold opacity-40 uppercase tracking-wider">Bugungi progress</span>
+                <div class="flex items-center gap-2 mt-0.5">
+                    <span id="daily-done-text" class="text-lg font-bold tabular">0</span>
+                    <span class="text-xs opacity-30">/</span>
+                    <span id="daily-total-text" class="text-sm font-bold opacity-50 tabular">0</span>
+                    <span class="text-xs opacity-30">marta</span>
                 </div>
             </div>
+        </div>
 
-            <!-- Quick Info Chips -->
-            <div class="flex gap-2 mb-8 px-1">
-                <div id="profile-city-chip" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style="background: var(--secondary-dim); color: var(--secondary);">
-                    <i class="ph ph-map-pin text-xs"></i>
-                    <span id="profile-city-text">...</span>
-                </div>
-                <div id="profile-prayer-chip" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style="background: var(--accent-dim); color: var(--accent);">
-                    <i class="ph ph-bell-ringing text-xs"></i>
-                    <span id="profile-prayer-status">Namoz ✓</span>
-                </div>
+        <!-- Filter -->
+        <div class="seg-ctrl mb-4">
+            <button class="seg-btn active" data-filter="all">Hammasi</button>
+            <button class="seg-btn" data-filter="done">✅ Bajarildi</button>
+            <button class="seg-btn" data-filter="pending">⏳ Davom</button>
+        </div>
+
+        <div id="dhikr-list" class="flex flex-col gap-2.5 pb-10">
+            <div class="card p-4 h-20 skel"></div>
+            <div class="card p-4 h-20 skel"></div>
+        </div>
+    </div>
+
+    <!-- ========== STATISTIKA ========== -->
+    <div id="v-stats" class="view w-full px-5 pt-6 pb-32">
+        <!-- Motivatsiya banner -->
+        <div id="motivation-banner" class="card p-4 mb-4 hidden overflow-hidden relative" style="border-left:3px solid var(--warning)">
+            <div class="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-10" style="background:var(--warning);filter:blur(20px)"></div>
+            <p id="motivation-text" class="text-sm font-semibold relative z-10">🔥 Davom eting!</p>
+        </div>
+
+        <h1 class="text-2xl font-bold mb-4">Statistika</h1>
+
+        <div class="grid grid-cols-2 gap-2.5 mb-2.5">
+            <div class="card p-4 flex flex-col items-center text-center">
+                <div class="w-9 h-9 rounded-full flex items-center justify-center mb-2" style="background:var(--accent-dim);color:var(--accent)"><i class="ph ph-calendar-check text-lg"></i></div>
+                <span class="text-[9px] opacity-40 font-bold uppercase tracking-wider">Bugun</span>
+                <span id="stat-daily" class="text-xl font-bold mt-0.5 tabular">0</span>
             </div>
-
-            <!-- Namoz Vaqtlari -->
-            <h3 class="text-sm font-semibold opacity-40 uppercase tracking-widest mb-3 ml-2">🕌 Namoz Vaqtlari</h3>
-            <div class="glass-card flex flex-col mb-8 overflow-hidden relative">
-                <div id="prayer-loading" class="absolute inset-0 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                    <i class="ph ph-spinner-gap animate-spin text-2xl text-[var(--accent)]"></i>
-                </div>
-                <div id="prayer-times-list" class="flex flex-col">
-                    <!-- JS injects prayer times here -->
-                </div>
-                <div class="p-3 border-t border-[var(--border)] flex items-center justify-between">
-                    <span id="prayer-city" class="text-xs font-medium opacity-40">📍 ...</span>
-                    <button id="refresh-prayer-btn" class="text-[var(--accent)] text-xs font-medium flex items-center gap-1 active:opacity-60">
-                        <i class="ph ph-arrows-clockwise text-sm"></i> Yangilash
-                    </button>
-                </div>
+            <div class="card p-4 flex flex-col items-center text-center">
+                <div class="w-9 h-9 rounded-full flex items-center justify-center mb-2 bg-blue-500/10 text-blue-500"><i class="ph ph-globe text-lg"></i></div>
+                <span class="text-[9px] opacity-40 font-bold uppercase tracking-wider">Umumiy</span>
+                <span id="stat-global" class="text-xl font-bold mt-0.5 tabular">0</span>
             </div>
-
-            <!-- Duo'lar -->
-            <h3 class="text-sm font-semibold opacity-40 uppercase tracking-widest mb-3 ml-2">🤲 Bugungi Duo</h3>
-            <div id="daily-dua-card" class="glass-card p-5 mb-8 relative overflow-hidden" style="border-left: 3px solid var(--accent);">
-                <!-- Decorative gradient -->
-                <div class="absolute top-0 right-0 w-24 h-24 rounded-full opacity-5" style="background: var(--accent); filter: blur(30px);"></div>
-                <div id="dua-loading" class="flex items-center justify-center py-6">
-                    <i class="ph ph-spinner-gap animate-spin text-xl text-[var(--accent)]"></i>
-                </div>
-                <div id="dua-content" class="hidden relative z-10">
-                    <p id="dua-arabic" class="text-right text-lg leading-loose mb-3 opacity-80 arabic-text" dir="rtl"></p>
-                    <p id="dua-text" class="text-sm italic opacity-70 mb-2"></p>
-                    <p id="dua-meaning" class="text-xs opacity-50"></p>
-                </div>
-                <button id="next-dua-btn" class="mt-3 w-full py-2.5 rounded-xl text-[var(--accent)] text-xs font-semibold active:bg-emerald-50 dark:active:bg-emerald-900/20 transition-colors flex items-center justify-center gap-1 relative z-10">
-                    <i class="ph ph-shuffle text-sm"></i> Boshqa duo
-                </button>
+        </div>
+        <div class="grid grid-cols-3 gap-2.5 mb-5">
+            <div class="card p-3 flex flex-col items-center text-center bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-800/30">
+                <i class="ph ph-fire text-xl text-orange-500 mb-0.5"></i>
+                <span class="text-[8px] uppercase font-bold tracking-wider opacity-40">Seriya</span>
+                <span id="stat-streak" class="text-sm font-bold text-orange-600 dark:text-orange-400 tabular">0</span>
             </div>
-
-            <h3 class="text-sm font-semibold opacity-40 uppercase tracking-widest mb-3 ml-2">⚙️ Ilova sozlamalari</h3>
-            <div class="glass-card flex flex-col mb-8 overflow-hidden">
-                <!-- Prayer Notification Toggle -->
-                <div class="p-4 flex items-center justify-between border-b border-[var(--border)]">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full flex items-center justify-center" style="background: var(--secondary-dim); color: var(--secondary);">
-                            <i class="ph ph-bell-simple-ringing text-lg"></i>
-                        </div>
-                        <div>
-                            <span class="font-medium text-sm block">Namoz eslatmalari</span>
-                            <span class="text-[10px] opacity-50">Har namoz oldidan eslatma</span>
-                        </div>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="prayer-toggle" class="sr-only peer" checked>
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500">
-                        </div>
-                    </label>
-                </div>
-
-                <!-- Theme Toggle -->
-                <div class="p-4 flex items-center justify-between border-b border-[var(--border)]">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-500 flex items-center justify-center">
-                            <i class="ph ph-palette text-lg"></i>
-                        </div>
-                        <span class="font-medium text-sm">Mavzu</span>
-                    </div>
-                    <div class="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-                        <button id="theme-auto"
-                            class="px-3 py-1 rounded-md text-[10px] font-bold active-theme shadow-sm bg-white dark:bg-gray-600 text-[var(--accent)] transition-all">Avto</button>
-                        <button id="theme-light"
-                            class="px-3 py-1 rounded-md text-[10px] font-bold opacity-60 transition-all">Kunduzgi</button>
-                        <button id="theme-dark"
-                            class="px-3 py-1 rounded-md text-[10px] font-bold opacity-60 transition-all">Tungi</button>
-                    </div>
-                </div>
-
-                <!-- Haptics Toggle -->
-                <div class="p-4 flex items-center justify-between border-b border-[var(--border)]">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-500 flex items-center justify-center">
-                            <i class="ph ph-vibrate text-lg"></i>
-                        </div>
-                        <div>
-                            <span class="font-medium text-sm block">Vibratsiya</span>
-                            <span class="text-[10px] opacity-50">Tasbeh bosilganda tebranish</span>
-                        </div>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="haptic-toggle" class="sr-only peer" checked>
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500">
-                        </div>
-                    </label>
-                </div>
-
-                <!-- Bot Link -->
-                <button onclick="tg.openTelegramLink('https://t.me/MyDailyDhikrBot')"
-                    class="p-4 flex items-center justify-between active:bg-gray-50 dark:active:bg-gray-800 transition-colors w-full text-left">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 flex items-center justify-center">
-                            <i class="ph ph-robot text-lg"></i>
-                        </div>
-                        <span class="font-medium text-sm">Botga qaytish</span>
-                    </div>
-                    <i class="ph ph-caret-right opacity-30"></i>
-                </button>
+            <div class="card p-3 flex flex-col items-center text-center bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800/30">
+                <i class="ph ph-trophy text-xl text-purple-500 mb-0.5"></i>
+                <span class="text-[8px] uppercase font-bold tracking-wider opacity-40">Sevimli</span>
+                <span id="stat-top" class="text-[11px] font-bold text-purple-600 dark:text-purple-400 mt-0.5 truncate w-full text-center">...</span>
             </div>
-
-            <h3 class="text-sm font-semibold opacity-40 uppercase tracking-widest mb-3 ml-2">⏰ Shaxsiy Eslatmalar</h3>
-            <div class="glass-card flex flex-col mb-8 overflow-hidden relative">
-                <!-- Loading overlay -->
-                <div id="reminders-loading" class="absolute inset-0 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                    <i class="ph ph-spinner-gap animate-spin text-2xl text-[var(--accent)]"></i>
-                </div>
-                
-                <div id="reminders-list" class="flex flex-col">
-                    <!-- Javascript injects reminders here -->
-                </div>
-                
-                <div class="relative w-full border-t border-[var(--border)] overflow-hidden">
-                    <input type="time" id="reminder-time-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" required>
-                    <button id="add-reminder-btn" class="p-4 flex items-center justify-center gap-2 text-[var(--accent)] active:bg-emerald-50 dark:active:bg-emerald-900/20 transition-colors w-full">
-                        <i class="ph ph-plus-circle text-lg"></i>
-                        <span class="font-medium text-sm">Yangi vaqt qo'shish</span>
-                    </button>
-                </div>
+            <div class="card p-3 flex flex-col items-center text-center bg-sky-50 dark:bg-sky-900/10 border-sky-200 dark:border-sky-800/30">
+                <i class="ph ph-star text-xl text-sky-500 mb-0.5"></i>
+                <span class="text-[8px] uppercase font-bold tracking-wider opacity-40">Eng yaxshi</span>
+                <span id="stat-best-day" class="text-sm font-bold text-sky-600 dark:text-sky-400 tabular">0</span>
             </div>
-            
-            <h3 class="text-sm font-semibold text-red-500 opacity-70 uppercase tracking-widest mb-3 ml-2">⚠️ Xavfli Hudud</h3>
-            <div class="glass-card flex flex-col mb-10 overflow-hidden border border-red-200 dark:border-red-900/30">
-                <button id="hard-reset-btn"
-                    class="p-4 flex items-center justify-between active:bg-red-50 dark:active:bg-red-900/20 transition-colors w-full text-left">
-                    <div class="flex items-center gap-3 text-red-500">
-                        <div class="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
-                            <i class="ph ph-trash text-lg"></i>
-                        </div>
-                        <div>
-                            <span class="font-medium text-sm block">Ma'lumotlarni o'chirish</span>
-                            <span class="text-[10px] opacity-60">Barcha zikr va statistikalar o'chiriladi</span>
-                        </div>
-                    </div>
-                    <i class="ph ph-caret-right opacity-30"></i>
+        </div>
+
+        <!-- Chart toggle -->
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold flex items-center gap-1.5"><i class="ph ph-chart-bar" style="color:var(--accent)"></i> Grafik</h3>
+            <div class="seg-ctrl" style="width:140px">
+                <button class="seg-btn active" data-range="7">7 kun</button>
+                <button class="seg-btn" data-range="30">30 kun</button>
+            </div>
+        </div>
+        <div class="card p-4 mb-5">
+            <div id="chart-bars" class="flex items-end justify-between h-28 gap-1 mt-1"></div>
+            <div id="chart-labels" class="flex justify-between mt-2 text-[9px] font-bold opacity-30 uppercase tracking-wide"></div>
+        </div>
+
+        <!-- Per-dhikr breakdown -->
+        <h3 class="text-base font-semibold mb-3 flex items-center gap-1.5"><i class="ph ph-list-checks" style="color:var(--secondary)"></i> Zikrlar bo'yicha</h3>
+        <div id="per-dhikr" class="card flex flex-col mb-5 overflow-hidden">
+            <div class="p-4 text-xs text-center opacity-30">Ma'lumot yuklanmoqda...</div>
+        </div>
+
+        <!-- Heat map -->
+        <h3 class="text-base font-semibold mb-3 flex items-center gap-1.5"><i class="ph ph-squares-four" style="color:var(--warning)"></i> Faollik xaritasi</h3>
+        <div class="card p-4 mb-6">
+            <div id="heat-map" class="grid gap-[3px]" style="grid-template-columns: repeat(7, 1fr);"></div>
+            <div class="flex justify-between mt-2 text-[8px] font-bold opacity-25 uppercase">
+                <span>Du</span><span>Se</span><span>Cho</span><span>Pay</span><span>Ju</span><span>Sha</span><span>Yak</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== PROFIL ========== -->
+    <div id="v-profile" class="view w-full px-5 pt-6 pb-32">
+        <h1 class="text-2xl font-bold mb-4">Profil</h1>
+
+        <div class="card p-5 flex items-center gap-4 mb-2">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl" style="background:var(--accent-dim)">📿</div>
+            <div class="flex-1">
+                <h2 id="profile-name" class="text-lg font-bold">...</h2>
+                <p id="profile-habit" class="text-xs opacity-40 mt-0.5">...</p>
+            </div>
+        </div>
+        <div class="flex gap-2 mb-6 px-1">
+            <div id="chip-city" class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold" style="background:var(--secondary-dim);color:var(--secondary)">
+                <i class="ph ph-map-pin text-xs"></i> <span id="chip-city-text">...</span>
+            </div>
+            <div id="chip-prayer" class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold" style="background:var(--accent-dim);color:var(--accent)">
+                <i class="ph ph-bell-ringing text-xs"></i> <span id="chip-prayer-text">Namoz ✓</span>
+            </div>
+        </div>
+
+        <!-- Namoz vaqtlari -->
+        <h3 class="text-xs font-bold opacity-30 uppercase tracking-widest mb-2 ml-1">🕌 Namoz Vaqtlari</h3>
+        <div class="card flex flex-col mb-6 overflow-hidden relative">
+            <div id="prayer-loading" class="absolute inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm z-10 flex items-center justify-center">
+                <i class="ph ph-spinner-gap animate-spin text-xl" style="color:var(--accent)"></i>
+            </div>
+            <!-- Countdown -->
+            <div id="prayer-countdown-bar" class="p-3 flex items-center justify-between border-b border-[var(--border)] hidden" style="background:var(--accent-dim)">
+                <span class="text-xs font-semibold" style="color:var(--accent)"><i class="ph ph-clock-countdown"></i> Keyingi namoz:</span>
+                <span id="prayer-countdown" class="text-sm font-bold tabular" style="color:var(--accent)">--:--</span>
+            </div>
+            <div id="prayer-list" class="flex flex-col"></div>
+            <div class="p-2.5 border-t border-[var(--border)] flex items-center justify-between">
+                <span id="prayer-city" class="text-[10px] font-medium opacity-30">📍 ...</span>
+                <button id="refresh-prayer" class="text-xs font-medium flex items-center gap-1 active:opacity-50" style="color:var(--accent)">
+                    <i class="ph ph-arrows-clockwise text-xs"></i> Yangilash
                 </button>
             </div>
         </div>
 
-    </main>
+        <!-- Shahar tanlash -->
+        <h3 class="text-xs font-bold opacity-30 uppercase tracking-widest mb-2 ml-1">🌍 Shahar</h3>
+        <div class="card mb-6 overflow-hidden">
+            <div class="p-3 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center" style="background:var(--secondary-dim);color:var(--secondary)"><i class="ph ph-map-pin text-lg"></i></div>
+                    <span class="font-medium text-sm">Shahringiz</span>
+                </div>
+                <select id="city-select" class="text-sm font-semibold bg-transparent border border-[var(--border)] rounded-lg px-2 py-1" style="color:var(--accent);outline:none">
+                    <option>Toshkent</option><option>Samarqand</option><option>Buxoro</option><option>Andijon</option>
+                    <option>Namangan</option><option>Farg'ona</option><option>Nukus</option><option>Qarshi</option>
+                    <option>Jizzax</option><option>Urganch</option><option>Navoiy</option><option>Termiz</option>
+                    <option>Chirchiq</option><option>Kokand</option>
+                </select>
+            </div>
+        </div>
 
-    <!-- BOTTOM NAVIGATION (Floating Pill) -->
-    <div class="glass-nav-container pb-safe">
-        <nav class="glass-nav">
-            <button class="nav-item active" data-target="view-tasbeh">
-                <i class="ph ph-hand-heart text-2xl"></i>
-                <span class="text-[10px] font-semibold uppercase tracking-wider">Tasbeh</span>
+        <!-- Duo -->
+        <h3 class="text-xs font-bold opacity-30 uppercase tracking-widest mb-2 ml-1">🤲 Bugungi Duo</h3>
+        <div id="dua-card" class="card p-4 mb-6 relative overflow-hidden" style="border-left:3px solid var(--accent)">
+            <div class="absolute top-0 right-0 w-20 h-20 rounded-full opacity-5" style="background:var(--accent);filter:blur(25px)"></div>
+            <div id="dua-loading" class="flex items-center justify-center py-4">
+                <i class="ph ph-spinner-gap animate-spin text-lg" style="color:var(--accent)"></i>
+            </div>
+            <div id="dua-content" class="hidden relative z-10">
+                <div class="flex items-center justify-between mb-2">
+                    <span id="dua-cat-badge" class="text-[10px] font-bold px-2 py-0.5 rounded-full" style="background:var(--accent-dim);color:var(--accent)">📿 Umumiy</span>
+                    <span id="dua-counter" class="text-[10px] font-bold opacity-30 tabular">1/1</span>
+                </div>
+                <p id="dua-arabic" class="text-right text-base leading-loose mb-2 opacity-80 arabic" dir="rtl"></p>
+                <p id="dua-text" class="text-sm italic opacity-60 mb-1"></p>
+            </div>
+            <div class="flex gap-2 mt-3 relative z-10">
+                <button id="prev-dua" class="flex-1 py-2 rounded-xl text-xs font-semibold active:opacity-50 transition-opacity flex items-center justify-center gap-1" style="color:var(--muted)">
+                    <i class="ph ph-caret-left text-xs"></i> Oldingi
+                </button>
+                <button id="next-dua" class="flex-1 py-2 rounded-xl text-xs font-semibold active:opacity-50 transition-opacity flex items-center justify-center gap-1" style="color:var(--accent)">
+                    Keyingi <i class="ph ph-caret-right text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sozlamalar -->
+        <h3 class="text-xs font-bold opacity-30 uppercase tracking-widest mb-2 ml-1">⚙️ Sozlamalar</h3>
+        <div class="card flex flex-col mb-6 overflow-hidden">
+            <div class="p-3.5 flex items-center justify-between border-b border-[var(--border)]">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center" style="background:var(--secondary-dim);color:var(--secondary)"><i class="ph ph-bell-simple-ringing text-lg"></i></div>
+                    <div><span class="font-medium text-sm block">Namoz eslatmalari</span><span class="text-[10px] opacity-40">Har namoz oldidan</span></div>
+                </div>
+                <label class="toggle"><input type="checkbox" id="prayer-toggle" checked><div class="toggle-track"></div><div class="toggle-thumb"></div></label>
+            </div>
+            <div class="p-3.5 flex items-center justify-between border-b border-[var(--border)]">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-500 flex items-center justify-center"><i class="ph ph-vibrate text-lg"></i></div>
+                    <div><span class="font-medium text-sm block">Vibratsiya</span><span class="text-[10px] opacity-40">Tasbeh bosilganda</span></div>
+                </div>
+                <label class="toggle"><input type="checkbox" id="haptic-toggle" checked><div class="toggle-track"></div><div class="toggle-thumb"></div></label>
+            </div>
+            <div class="p-3.5 flex items-center justify-between border-b border-[var(--border)]">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-500 flex items-center justify-center"><i class="ph ph-palette text-lg"></i></div>
+                    <span class="font-medium text-sm">Mavzu</span>
+                </div>
+                <div class="seg-ctrl" style="width:150px">
+                    <button id="t-auto" class="seg-btn active">Avto</button>
+                    <button id="t-light" class="seg-btn">☀️</button>
+                    <button id="t-dark" class="seg-btn">🌙</button>
+                </div>
+            </div>
+            <button onclick="tg.openTelegramLink('https://t.me/MyDailyDhikrBot')" class="p-3.5 flex items-center justify-between active:bg-gray-50 dark:active:bg-gray-800 transition-colors w-full text-left">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 flex items-center justify-center"><i class="ph ph-robot text-lg"></i></div>
+                    <span class="font-medium text-sm">Botga qaytish</span>
+                </div>
+                <i class="ph ph-caret-right opacity-20"></i>
             </button>
-            <button class="nav-item" data-target="view-zikrlar">
-                <i class="ph ph-book-open text-2xl"></i>
-                <span class="text-[10px] font-semibold uppercase tracking-wider">Zikrlar</span>
+        </div>
+
+        <!-- Eslatmalar -->
+        <h3 class="text-xs font-bold opacity-30 uppercase tracking-widest mb-2 ml-1">⏰ Eslatmalar</h3>
+        <div class="card flex flex-col mb-6 overflow-hidden relative">
+            <div id="rem-loading" class="absolute inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm z-10 flex items-center justify-center">
+                <i class="ph ph-spinner-gap animate-spin text-lg" style="color:var(--accent)"></i>
+            </div>
+            <div id="rem-list" class="flex flex-col"></div>
+            <div class="relative w-full border-t border-[var(--border)]">
+                <input type="time" id="rem-time" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                <button class="p-3.5 flex items-center justify-center gap-2 w-full active:opacity-50 transition-opacity" style="color:var(--accent)">
+                    <i class="ph ph-plus-circle text-lg"></i><span class="font-medium text-sm">Yangi vaqt qo'shish</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Danger -->
+        <h3 class="text-xs font-bold text-red-500 opacity-60 uppercase tracking-widest mb-2 ml-1">⚠️ Xavfli</h3>
+        <div class="card flex flex-col mb-10 overflow-hidden border border-red-200 dark:border-red-900/30">
+            <button id="hard-reset" class="p-3.5 flex items-center justify-between active:bg-red-50 dark:active:bg-red-900/20 transition-colors w-full text-left">
+                <div class="flex items-center gap-2.5 text-red-500">
+                    <div class="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center"><i class="ph ph-trash text-lg"></i></div>
+                    <div><span class="font-medium text-sm block">Barcha ma'lumotlarni o'chirish</span><span class="text-[10px] opacity-50">Zikr va statistikalar o'chadi</span></div>
+                </div>
+                <i class="ph ph-caret-right opacity-20"></i>
             </button>
-            <button class="nav-item" data-target="view-stats">
-                <i class="ph ph-chart-line-up text-2xl"></i>
-                <span class="text-[10px] font-semibold uppercase tracking-wider">Statistika</span>
-            </button>
-            <button class="nav-item" data-target="view-profile">
-                <i class="ph ph-user-circle text-2xl"></i>
-                <span class="text-[10px] font-semibold uppercase tracking-wider">Profil</span>
-            </button>
+        </div>
+    </div>
+
+    <!-- QUICK SWITCH BOTTOM SHEET -->
+    <div id="sheet-overlay" class="sheet-overlay"></div>
+    <div id="sheet-panel" class="sheet-panel">
+        <div class="sheet-handle"></div>
+        <div class="p-4 pb-2"><h3 class="text-base font-bold">Zikr tanlash</h3></div>
+        <div id="sheet-list" class="flex flex-col px-4 pb-6 gap-2"></div>
+    </div>
+
+    <!-- BOTTOM NAV -->
+    <div class="nav-wrap pb-safe">
+        <nav class="nav-pill">
+            <button class="nav-btn active" data-view="v-tasbeh"><i class="ph ph-hand-heart text-2xl"></i><span class="text-[9px] font-bold uppercase tracking-wider">Tasbeh</span></button>
+            <button class="nav-btn" data-view="v-zikrlar"><i class="ph ph-book-open text-2xl"></i><span class="text-[9px] font-bold uppercase tracking-wider">Zikrlar</span></button>
+            <button class="nav-btn" data-view="v-stats"><i class="ph ph-chart-line-up text-2xl"></i><span class="text-[9px] font-bold uppercase tracking-wider">Statistika</span></button>
+            <button class="nav-btn" data-view="v-profile"><i class="ph ph-user-circle text-2xl"></i><span class="text-[9px] font-bold uppercase tracking-wider">Profil</span></button>
         </nav>
     </div>
 
     <script src="app.js"></script>
 </body>
-
 </html>

@@ -1,967 +1,742 @@
 const tg = window.Telegram.WebApp;
-tg.expand();
-tg.ready();
+tg.expand(); tg.ready();
 
-// Supabase Configuration
 const SUPABASE_URL = 'https://rvrehsjveyvlnpxnmjqh.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2cmVoc2p2ZXl2bG5weG5tanFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MjkwMzgsImV4cCI6MjA5NzEwNTAzOH0.oJne7OxGW_6I1H37YpcOLKQ-_PPRi029VRrBVPlndf8';
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// User State
 let userId = tg.initDataUnsafe?.user?.id || 1277687464;
 let currentDhikr = null;
 let currentCount = 0;
+let hapticsOn = localStorage.getItem('haptics') !== 'false';
+let themeMode = localStorage.getItem('theme') || 'auto';
 
 // Helpers
-const getLocalISODate = (d) => new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-const todayStr = () => getLocalISODate(new Date());
-const formatNumber = (n) => n?.toLocaleString('uz-UZ') || '0';
+const isoDate = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+const today = () => isoDate(new Date());
+const fmt = (n) => (n || 0).toLocaleString('uz-UZ');
+const $ = (id) => document.getElementById(id);
+const haptic = (t) => { if (hapticsOn) tg.HapticFeedback.impactOccurred(t); };
 
-// Theme Logic
-let currentThemeOverride = localStorage.getItem('appTheme') || 'auto';
-
+// ===== THEME =====
 function applyTheme() {
-    if (currentThemeOverride === 'dark') {
-        document.body.classList.add('dark-theme');
-    } else if (currentThemeOverride === 'light') {
-        document.body.classList.remove('dark-theme');
-    } else {
-        if (tg.colorScheme === 'dark') {
-            document.body.classList.add('dark-theme');
-        } else {
-            document.body.classList.remove('dark-theme');
-        }
-    }
-    updateThemeUI();
+    const dark = themeMode === 'dark' || (themeMode === 'auto' && tg.colorScheme === 'dark');
+    document.body.classList.toggle('dark-theme', dark);
+    [$('t-auto'), $('t-light'), $('t-dark')].forEach(b => { b.classList.remove('active'); });
+    $(`t-${themeMode}`).classList.add('active');
 }
-
-function updateThemeUI() {
-    const btnAuto = document.getElementById('theme-auto');
-    const btnLight = document.getElementById('theme-light');
-    const btnDark = document.getElementById('theme-dark');
-    if(!btnAuto) return;
-    
-    [btnAuto, btnLight, btnDark].forEach(btn => {
-        btn.classList.remove('bg-white', 'dark:bg-gray-600', 'text-[var(--accent)]', 'shadow-sm');
-        btn.classList.add('opacity-60');
-    });
-    
-    let activeBtn = btnAuto;
-    if (currentThemeOverride === 'light') activeBtn = btnLight;
-    if (currentThemeOverride === 'dark') activeBtn = btnDark;
-    
-    activeBtn.classList.remove('opacity-60');
-    activeBtn.classList.add('bg-white', 'dark:bg-gray-600', 'text-[var(--accent)]', 'shadow-sm');
-}
-
 tg.onEvent('themeChanged', applyTheme);
+['auto', 'light', 'dark'].forEach(m => {
+    $(`t-${m}`)?.addEventListener('click', () => { themeMode = m; localStorage.setItem('theme', m); applyTheme(); });
+});
+applyTheme();
 
-// Initialize Theme & Haptic Listeners when DOM is ready
-setTimeout(() => {
-    document.getElementById('theme-auto')?.addEventListener('click', () => { currentThemeOverride = 'auto'; localStorage.setItem('appTheme', 'auto'); applyTheme(); });
-    document.getElementById('theme-light')?.addEventListener('click', () => { currentThemeOverride = 'light'; localStorage.setItem('appTheme', 'light'); applyTheme(); });
-    document.getElementById('theme-dark')?.addEventListener('click', () => { currentThemeOverride = 'dark'; localStorage.setItem('appTheme', 'dark'); applyTheme(); });
-    
-    const hToggle = document.getElementById('haptic-toggle');
-    if(hToggle) {
-        hToggle.checked = hapticsEnabled;
-        hToggle.addEventListener('change', (e) => {
-            hapticsEnabled = e.target.checked;
-            localStorage.setItem('hapticsEnabled', hapticsEnabled);
-            if(hapticsEnabled) tg.HapticFeedback.impactOccurred('light');
-        });
-    }
-    applyTheme();
-}, 0);
+$('haptic-toggle').checked = hapticsOn;
+$('haptic-toggle').addEventListener('change', e => {
+    hapticsOn = e.target.checked;
+    localStorage.setItem('haptics', hapticsOn);
+    if (hapticsOn) haptic('light');
+});
 
-// Haptics Logic
-let hapticsEnabled = localStorage.getItem('hapticsEnabled') !== 'false';
-
-// -----------------------------------------------------
-// 1. TAB NAVIGATION
-// -----------------------------------------------------
-const navItems = document.querySelectorAll('.nav-item');
-const views = document.querySelectorAll('.view-container');
-
-navItems.forEach(item => {
-    item.addEventListener('click', () => {
-        navItems.forEach(n => n.classList.remove('active'));
+// ===== NAV =====
+const navBtns = document.querySelectorAll('.nav-btn');
+const views = document.querySelectorAll('.view');
+navBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        navBtns.forEach(b => b.classList.remove('active'));
         views.forEach(v => v.classList.remove('active'));
-        
-        item.classList.add('active');
-        const targetId = item.getAttribute('data-target');
-        const targetView = document.getElementById(targetId);
-        targetView.classList.add('active');
-        
-        // Scroll to top when switching tabs
-        targetView.scrollTop = 0;
-        
+        btn.classList.add('active');
+        const v = $(btn.dataset.view);
+        v.classList.add('active');
+        v.scrollTop = 0;
         tg.HapticFeedback.selectionChanged();
-        
-        if (targetId === 'view-zikrlar') fetchDhikrs();
-        if (targetId === 'view-stats') fetchStats();
-        if (targetId === 'view-profile') {
-            fetchReminders();
-            fetchPrayerTimes();
-            fetchDuas();
-        }
+        if (btn.dataset.view === 'v-zikrlar') fetchDhikrs();
+        if (btn.dataset.view === 'v-stats') fetchStats();
+        if (btn.dataset.view === 'v-profile') { fetchReminders(); fetchPrayerTimes(); fetchDuas(); }
     });
 });
 
-// -----------------------------------------------------
-// 2. DATA FETCHING (SUPABASE)
-// -----------------------------------------------------
-
+// ===== INIT =====
 async function initApp() {
-    // Show Skeletons
-    document.getElementById('dhikr-title').innerHTML = '<div class="skeleton h-8 w-64 mx-auto rounded-md"></div>';
-    document.getElementById('target-count').innerHTML = '<div class="skeleton h-4 w-12 inline-block rounded-md"></div>';
-    document.getElementById('counter').innerHTML = '<div class="skeleton h-16 w-16 mx-auto rounded-md mt-2"></div>';
-    document.getElementById('profile-name').innerHTML = '<div class="skeleton h-6 w-32 rounded-md"></div>';
-    document.getElementById('profile-habit').innerHTML = '<div class="skeleton h-4 w-20 rounded-md mt-1"></div>';
+    $('dhikr-title').innerHTML = '<div class="skel h-7 w-48 mx-auto"></div>';
+    $('counter').innerHTML = '<div class="skel h-14 w-14 mx-auto mt-1"></div>';
+    $('profile-name').innerHTML = '<div class="skel h-5 w-28"></div>';
+    $('profile-habit').innerHTML = '<div class="skel h-3 w-16 mt-1"></div>';
 
-    const start = Date.now();
-    
-    // 1. Fetch User Profile
-    const { data: user } = await supabaseClient.from('users').select('*').eq('user_id', userId).single();
+    const { data: user } = await db.from('users').select('*').eq('user_id', userId).single();
     if (user) {
-        document.getElementById('profile-name').textContent = user.full_name || 'Foydalanuvchi';
-        
-        const habitTexts = {
-            beginner: '🌱 Yangi boshlayapman',
-            medium: '🌿 Vaqt topganda',
-            advanced: '🌳 Doimiy odat'
-        };
-        document.getElementById('profile-habit').textContent = habitTexts[user.habit_level] || user.habit_level || '';
-        
-        // Profile chips
-        const cityChip = document.getElementById('profile-city-text');
-        const prayerChip = document.getElementById('profile-prayer-status');
-        if (cityChip) cityChip.textContent = user.city || 'Toshkent';
-        if (prayerChip) {
-            if (user.prayer_notifications) {
-                prayerChip.textContent = 'Namoz ✓';
-                document.getElementById('profile-prayer-chip').style.background = 'var(--accent-dim)';
-                document.getElementById('profile-prayer-chip').style.color = 'var(--accent)';
-            } else {
-                prayerChip.textContent = 'Namoz ✗';
-                document.getElementById('profile-prayer-chip').style.background = 'rgba(239,68,68,0.1)';
-                document.getElementById('profile-prayer-chip').style.color = '#ef4444';
-            }
+        $('profile-name').textContent = user.full_name || 'Foydalanuvchi';
+        const habits = { beginner: '🌱 Yangi boshlayapman', medium: '🌿 Vaqt topganda', advanced: '🌳 Doimiy odat' };
+        $('profile-habit').textContent = habits[user.habit_level] || '';
+        $('chip-city-text').textContent = user.city || 'Toshkent';
+        $('city-select').value = user.city || 'Toshkent';
+        if (user.prayer_notifications) {
+            $('chip-prayer-text').textContent = 'Namoz ✓';
+        } else {
+            $('chip-prayer-text').textContent = 'Namoz ✗';
+            $('chip-prayer').style.background = 'rgba(239,68,68,0.1)';
+            $('chip-prayer').style.color = '#ef4444';
         }
     }
-
-    // 2. Fetch Dhikrs
     await fetchDhikrs();
-    
-    // 3. Fetch Reminders
     fetchReminders();
-    
-    const elapsed = Date.now() - start;
-    if (elapsed < 400) await new Promise(r => setTimeout(r, 400 - elapsed));
-    
     if (!currentDhikr) {
-        document.getElementById('dhikr-title').textContent = "Zikr qo'shing";
-        document.getElementById('target-count').textContent = "0";
-        document.getElementById('counter').textContent = "0";
+        $('dhikr-title').textContent = "Zikr qo'shing";
+        $('target-count').textContent = "0";
+        $('counter').textContent = "0";
     }
 }
 
-async function fetchDhikrs() {
-    const listEl = document.getElementById('dhikr-list');
-    
-    listEl.innerHTML = `
-        <div class="glass-card p-4 flex items-center justify-between border-transparent">
-            <div class="flex-1 pr-4">
-                <div class="skeleton h-5 w-3/4 mb-3"></div>
-                <div class="flex gap-4">
-                    <div class="skeleton h-3 w-16"></div>
-                    <div class="skeleton h-3 w-16"></div>
-                </div>
-            </div>
-            <div class="skeleton h-6 w-6 rounded-full"></div>
-        </div>
-        <div class="glass-card p-4 flex items-center justify-between border-transparent">
-            <div class="flex-1 pr-4">
-                <div class="skeleton h-5 w-1/2 mb-3"></div>
-                <div class="flex gap-4">
-                    <div class="skeleton h-3 w-16"></div>
-                    <div class="skeleton h-3 w-16"></div>
-                </div>
-            </div>
-            <div class="skeleton h-6 w-6 rounded-full"></div>
-        </div>
-    `;
+// ===== DHIKRS =====
+let allDhikrs = [];
+let allProgress = {};
+let currentFilter = 'all';
 
-    const start = Date.now();
-    const { data: dhikrs, error } = await supabaseClient.from('dhikrs').select('*').eq('user_id', userId).order('id');
-    
-    // Bugungi progress'ni ham olib kelamiz
-    const today = todayStr();
-    const { data: todayProgress } = await supabaseClient.from('daily_progress')
-        .select('dhikr_id, count').eq('user_id', userId).eq('date', today);
-    
-    const progressMap = {};
-    if (todayProgress) todayProgress.forEach(p => { progressMap[p.dhikr_id] = p.count || 0; });
-    
-    const elapsed = Date.now() - start;
-    if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
-    
-    if (error || !dhikrs || dhikrs.length === 0) {
-        listEl.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-16 text-center">
-                <div class="w-16 h-16 rounded-full flex items-center justify-center mb-4 opacity-20" style="background: var(--border);">
-                    <i class="ph ph-book-open text-3xl"></i>
-                </div>
-                <p class="text-sm opacity-40 font-medium">Hali zikr qo'shilmagan</p>
-                <p class="text-xs opacity-30 mt-1">Bot orqali zikr qo'shing</p>
-            </div>`;
-        document.getElementById('dhikr-count-badge').textContent = '0 ta';
+// Filter buttons
+document.querySelectorAll('[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.dataset.filter;
+        renderDhikrList();
+    });
+});
+
+async function fetchDhikrs() {
+    const list = $('dhikr-list');
+    list.innerHTML = '<div class="card p-4 h-20 skel"></div><div class="card p-4 h-20 skel"></div>';
+
+    const [{ data: dhikrs }, { data: prog }] = await Promise.all([
+        db.from('dhikrs').select('*').eq('user_id', userId).order('id'),
+        db.from('daily_progress').select('dhikr_id, count').eq('user_id', userId).eq('date', today())
+    ]);
+
+    allDhikrs = dhikrs || [];
+    allProgress = {};
+    if (prog) prog.forEach(p => { allProgress[p.dhikr_id] = p.count || 0; });
+
+    $('dhikr-badge').textContent = `${allDhikrs.length} ta`;
+
+    if (!currentDhikr && allDhikrs.length > 0) await selectDhikr(allDhikrs[0]);
+
+    // Daily summary ring
+    if (allDhikrs.length > 0) {
+        let totalDone = 0, totalTarget = 0;
+        allDhikrs.forEach(d => {
+            totalDone += allProgress[d.id] || 0;
+            totalTarget += d.daily_target || 0;
+        });
+        const pct = totalTarget > 0 ? Math.min(100, Math.round(totalDone / totalTarget * 100)) : 0;
+        $('daily-summary').classList.remove('hidden');
+        $('daily-pct').textContent = `${pct}%`;
+        $('daily-done-text').textContent = fmt(totalDone);
+        $('daily-total-text').textContent = fmt(totalTarget);
+        const circ = 2 * Math.PI * 20;
+        $('daily-ring').style.strokeDashoffset = circ - (pct / 100 * circ);
+    }
+
+    renderDhikrList();
+}
+
+function renderDhikrList() {
+    const list = $('dhikr-list');
+    let filtered = allDhikrs;
+    if (currentFilter === 'done') filtered = allDhikrs.filter(d => (allProgress[d.id] || 0) >= d.daily_target && d.daily_target > 0);
+    if (currentFilter === 'pending') filtered = allDhikrs.filter(d => (allProgress[d.id] || 0) < d.daily_target || d.daily_target === 0);
+
+    if (filtered.length === 0) {
+        list.innerHTML = `<div class="flex flex-col items-center py-12 text-center">
+            <div class="w-14 h-14 rounded-full flex items-center justify-center mb-3 opacity-15" style="background:var(--border)"><i class="ph ph-book-open text-2xl"></i></div>
+            <p class="text-sm opacity-30 font-medium">${currentFilter === 'all' ? "Hali zikr qo'shilmagan" : 'Topilmadi'}</p></div>`;
         return;
     }
 
-    // Badge
-    document.getElementById('dhikr-count-badge').textContent = `${dhikrs.length} ta`;
+    list.innerHTML = '';
+    filtered.forEach(d => {
+        const isSel = currentDhikr?.id === d.id;
+        const done = allProgress[d.id] || 0;
+        const pct = d.daily_target > 0 ? Math.min(100, Math.round(done / d.daily_target * 100)) : 0;
+        const isDone = done >= d.daily_target && d.daily_target > 0;
 
-    if (!currentDhikr && dhikrs.length > 0) {
-        await selectDhikr(dhikrs[0]);
-    }
-
-    listEl.innerHTML = '';
-    dhikrs.forEach(d => {
-        const isSelected = currentDhikr && currentDhikr.id === d.id;
-        const dailyDone = progressMap[d.id] || 0;
-        const dailyPercent = d.daily_target > 0 ? Math.min(100, Math.round((dailyDone / d.daily_target) * 100)) : 0;
-        const isDailyComplete = dailyDone >= d.daily_target && d.daily_target > 0;
-        
         const el = document.createElement('div');
-        el.className = `glass-card glass-card-interactive p-4 cursor-pointer ${isSelected ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/20' : ''}`;
-        el.onclick = async () => {
-            await selectDhikr(d);
-            navItems[0].click();
-        };
-        
+        el.className = `card card-press p-3 cursor-pointer flex items-center gap-3 ${isSel ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/15' : ''} ${isDone ? 'glow-gold' : ''}`;
+        el.onclick = async () => { await selectDhikr(d); navBtns[0].click(); };
+
+        // Mini SVG ring
+        const ringCirc = 2 * Math.PI * 16;
+        const ringOffset = ringCirc - (pct / 100 * ringCirc);
+        const ringColor = isDone ? 'var(--warning)' : 'var(--accent)';
+
         el.innerHTML = `
-            <div class="flex items-center justify-between mb-2">
-                <h3 class="font-bold text-base">${d.title}</h3>
-                ${isSelected 
-                    ? '<i class="ph-fill ph-check-circle text-xl text-emerald-500"></i>' 
-                    : '<i class="ph ph-circle text-xl opacity-15"></i>'}
+            <div class="relative w-11 h-11 flex-shrink-0">
+                <svg class="w-11 h-11" viewBox="0 0 40 40">
+                    <circle cx="20" cy="20" r="16" fill="none" stroke="var(--border)" stroke-width="3" opacity="0.25"/>
+                    <circle class="ring-circle" cx="20" cy="20" r="16" fill="none" stroke="${ringColor}" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="${ringCirc}" stroke-dashoffset="${ringOffset}"/>
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-[9px] font-extrabold tabular" style="color:${ringColor}">${pct}%</span>
             </div>
-            <div class="flex gap-4 text-xs font-medium opacity-50 mb-2.5">
-                <span class="flex items-center gap-1"><i class="ph ph-target text-xs"></i> ${formatNumber(d.daily_target)}/kun</span>
-                <span class="flex items-center gap-1"><i class="ph ph-chart-bar text-xs"></i> ${formatNumber(d.global_count || 0)} jami</span>
-                ${isDailyComplete ? '<span class="text-emerald-500 font-bold">✓ Bajarildi</span>' : `<span>${formatNumber(dailyDone)} bugun</span>`}
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between mb-0.5">
+                    <h3 class="font-bold text-sm truncate">${d.title}</h3>
+                    ${isSel ? '<i class="ph-fill ph-check-circle text-emerald-500 text-base flex-shrink-0"></i>' : ''}
+                </div>
+                <div class="flex gap-3 text-[10px] font-medium opacity-40 mb-1.5">
+                    <span>${fmt(done)}/${fmt(d.daily_target)} bugun</span>
+                    <span>${fmt(d.global_count || 0)} jami</span>
+                    ${isDone ? '<span class="text-amber-500 font-bold">✓ Bajarildi</span>' : ''}
+                </div>
+                <div class="progress-track"><div class="progress-fill ${isDone ? '!bg-amber-400' : ''}" style="width:${pct}%"></div></div>
             </div>
-            <div class="dhikr-progress">
-                <div class="dhikr-progress-fill ${isDailyComplete ? '!bg-amber-400' : ''}" style="width: ${dailyPercent}%"></div>
-            </div>
-        `;
-        listEl.appendChild(el);
+            <i class="ph ph-caret-right opacity-15 flex-shrink-0"></i>`;
+        list.appendChild(el);
     });
 }
 
-async function fetchStats() {
-    document.getElementById('stat-daily').innerHTML = '<div class="skeleton h-6 w-12 mx-auto rounded-md mt-1"></div>';
-    document.getElementById('stat-global').innerHTML = '<div class="skeleton h-6 w-16 mx-auto rounded-md mt-1"></div>';
-    document.getElementById('stat-streak').innerHTML = '<div class="skeleton h-6 w-16 mx-auto rounded-md mt-1"></div>';
-    document.getElementById('stat-top').innerHTML = '<div class="skeleton h-5 w-24 mx-auto rounded-md mt-1"></div>';
-
-    const start = Date.now();
-    const { data: dhikrs } = await supabaseClient.from('dhikrs').select('title, global_count').eq('user_id', userId);
-    
-    const today = todayStr();
-    const { data: todayProgress } = await supabaseClient.from('daily_progress')
-        .select('count').eq('user_id', userId).eq('date', today);
-    
-    const elapsed = Date.now() - start;
-    if (elapsed < 300) await new Promise(r => setTimeout(r, 300 - elapsed));
-    
-    let totalDaily = 0;
-    let totalGlobal = 0;
-    let topDhikr = { title: "Yo'q", count: -1 };
-    
-    if (todayProgress) {
-        todayProgress.forEach(p => { totalDaily += (p.count || 0); });
-    }
-    
-    if (dhikrs) {
-        dhikrs.forEach(d => {
-            totalGlobal += (d.global_count || 0);
-            if ((d.global_count || 0) > topDhikr.count) {
-                topDhikr = { title: d.title, count: d.global_count || 0 };
-            }
-        });
-    }
-    
-    // Animate numbers
-    animateNumber('stat-daily', totalDaily);
-    animateNumber('stat-global', totalGlobal);
-    document.getElementById('stat-top').textContent = topDhikr.count > 0 ? topDhikr.title : "Hali yo'q";
-    
-    // Fetch progress for streak and chart
-    const { data: progress } = await supabaseClient.from('daily_progress')
-        .select('date, count')
-        .eq('user_id', userId)
-        .order('date', { ascending: false })
-        .limit(100);
-        
-    const dailyTotals = {};
-    if (progress) {
-        progress.forEach(p => {
-            dailyTotals[p.date] = (dailyTotals[p.date] || 0) + p.count;
-        });
-    }
-    
-    // Calculate Streak
-    let streak = 0;
-    let checkDate = new Date();
-    let checkStr = getLocalISODate(checkDate);
-    
-    if (!dailyTotals[checkStr] || dailyTotals[checkStr] === 0) {
-        checkDate.setDate(checkDate.getDate() - 1);
-        checkStr = getLocalISODate(checkDate);
-    }
-    
-    while (dailyTotals[checkStr] > 0) {
-        streak++;
-        checkDate.setDate(checkDate.getDate() - 1);
-        checkStr = getLocalISODate(checkDate);
-    }
-    
-    document.getElementById('stat-streak').textContent = `${streak} kun`;
-    
-    // Render 7-day Bar Chart
-    const chartContainer = document.getElementById('chart-container');
-    const chartLabels = document.getElementById('chart-labels');
-    chartContainer.innerHTML = '';
-    chartLabels.innerHTML = '';
-    
-    const dayNames = ['Yak', 'Du', 'Se', 'Cho', 'Pay', 'Ju', 'Sha'];
-    const last7 = [];
-    
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateStr = getLocalISODate(d);
-        last7.push({
-            date: dateStr,
-            dayName: dayNames[d.getDay()],
-            count: dailyTotals[dateStr] || 0,
-            isToday: i === 0
-        });
-    }
-    
-    const maxCount = Math.max(...last7.map(d => d.count), 1);
-    
-    last7.forEach((day, idx) => {
-        const percent = (day.count / maxCount) * 100;
-        const minHeight = day.count > 0 ? 12 : 4;
-        const height = Math.max(minHeight, percent);
-        
-        const bar = document.createElement('div');
-        bar.className = 'flex-1 rounded-t-lg chart-bar relative group cursor-pointer';
-        bar.style.height = '0%';
-        bar.style.background = day.isToday 
-            ? 'var(--accent)' 
-            : day.count > 0 
-                ? 'var(--accent-dim)' 
-                : 'var(--border)';
-        bar.style.opacity = day.isToday ? '1' : day.count > 0 ? '0.7' : '0.3';
-        
-        // Count label on top
-        if (day.count > 0) {
-            const label = document.createElement('span');
-            label.className = 'absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold opacity-0 tabular-nums transition-opacity';
-            label.textContent = formatNumber(day.count);
-            bar.appendChild(label);
-            bar.addEventListener('touchstart', () => { label.style.opacity = '1'; });
-            bar.addEventListener('touchend', () => { setTimeout(() => { label.style.opacity = '0'; }, 1500); });
-        }
-        
-        chartContainer.appendChild(bar);
-        
-        // Animate bars with delay
-        setTimeout(() => {
-            bar.style.height = `${height}%`;
-        }, 100 + idx * 80);
-        
-        const labelEl = document.createElement('span');
-        labelEl.className = `flex-1 text-center ${day.isToday ? 'text-[var(--accent)] font-extrabold' : ''}`;
-        labelEl.textContent = day.isToday ? 'Bugun' : day.dayName;
-        chartLabels.appendChild(labelEl);
-    });
-}
-
-function animateNumber(elementId, target) {
-    const el = document.getElementById(elementId);
-    if (!el) return;
-    const duration = 600;
-    const start = performance.now();
-    const startVal = 0;
-    
-    function update(now) {
-        const elapsed = now - start;
-        const progress = Math.min(elapsed / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-        const current = Math.round(startVal + (target - startVal) * eased);
-        el.textContent = formatNumber(current);
-        if (progress < 1) requestAnimationFrame(update);
-    }
-    requestAnimationFrame(update);
-}
-
-// -----------------------------------------------------
-// 3. TASBEH COUNTER
-// -----------------------------------------------------
-
-const counterEl = document.getElementById('counter');
-const tapArea = document.getElementById('tap-area');
-const progressRing = document.getElementById('progress-ring');
+// ===== TASBEH =====
 const circumference = 2 * Math.PI * 44;
-
-progressRing.style.strokeDasharray = `${circumference} ${circumference}`;
-progressRing.style.strokeDashoffset = circumference;
-
-let goalReachedNotified = false;
+$('progress-ring').style.strokeDasharray = `${circumference} ${circumference}`;
+$('progress-ring').style.strokeDashoffset = circumference;
+let goalNotified = false;
+let sessionStart = null;
+let sessionInterval = null;
+let tapTimestamps = [];
 
 async function selectDhikr(d) {
     currentDhikr = d;
-    goalReachedNotified = false;
-    
-    const today = todayStr();
-    
+    goalNotified = false;
     try {
-        const { data: prog } = await supabaseClient.from('daily_progress')
-            .select('count')
-            .eq('user_id', userId)
-            .eq('dhikr_id', d.id)
-            .eq('date', today)
-            .single();
-        
+        const { data: prog } = await db.from('daily_progress').select('count').eq('user_id', userId).eq('dhikr_id', d.id).eq('date', today()).single();
         currentCount = prog ? (prog.count || 0) : 0;
-    } catch {
-        currentCount = 0;
-    }
-    
+    } catch { currentCount = 0; }
     currentDhikr._todayCount = currentCount;
-    
-    document.getElementById('dhikr-title').textContent = d.title;
-    document.getElementById('target-count').textContent = formatNumber(d.daily_target);
-    
-    // Global progress bar
-    const globalBar = document.getElementById('global-progress-bar');
-    const globalFill = document.getElementById('global-progress-fill');
-    const globalText = document.getElementById('global-progress-text');
-    
-    if (d.global_target && d.global_target > 0) {
-        globalBar.classList.remove('hidden');
-        const globalPercent = Math.min(100, ((d.global_count || 0) / d.global_target) * 100);
-        globalFill.style.width = `${globalPercent}%`;
-        globalText.textContent = `${formatNumber(d.global_count || 0)} / ${formatNumber(d.global_target)}`;
-    } else {
-        globalBar.classList.add('hidden');
-    }
-    
-    if (currentCount >= d.daily_target && d.daily_target > 0) {
-        goalReachedNotified = true;
-    }
-    
-    updateCounterUI();
+    $('dhikr-title').textContent = d.title;
+    $('target-count').textContent = fmt(d.daily_target);
+    $('dhikr-title-badge').textContent = d.title.length > 20 ? d.title.slice(0, 18) + '…' : d.title;
+
+    if (d.global_target > 0) {
+        $('global-bar').classList.remove('hidden');
+        const gp = Math.min(100, ((d.global_count || 0) / d.global_target) * 100);
+        $('global-fill').style.width = `${gp}%`;
+        $('global-text').textContent = `${fmt(d.global_count || 0)} / ${fmt(d.global_target)}`;
+    } else { $('global-bar').classList.add('hidden'); }
+
+    if (currentCount >= d.daily_target && d.daily_target > 0) goalNotified = true;
+    // Reset session
+    sessionStart = null;
+    tapTimestamps = [];
+    $('session-timer').classList.add('hidden');
+    $('rpm-label').classList.add('hidden');
+    if (sessionInterval) { clearInterval(sessionInterval); sessionInterval = null; }
+    updateUI();
 }
 
-function updateCounterUI() {
-    counterEl.textContent = formatNumber(currentCount);
-    
+function updateUI() {
+    $('counter').textContent = fmt(currentCount);
     if (!currentDhikr) return;
-    
-    let percent = currentCount / currentDhikr.daily_target;
-    if (percent > 1) percent = 1;
-    
-    const offset = circumference - (percent * circumference);
-    progressRing.style.strokeDashoffset = offset;
-    
-    const label = document.getElementById('counter-label');
+    let pct = Math.min(1, currentCount / currentDhikr.daily_target);
+    $('progress-ring').style.strokeDashoffset = circumference - pct * circumference;
 
     if (currentCount >= currentDhikr.daily_target && currentDhikr.daily_target > 0) {
-        progressRing.style.stroke = "#f59e0b";
-        label.classList.remove('hidden');
-        
-        if (!goalReachedNotified) {
-            goalReachedNotified = true;
+        $('progress-ring').style.stroke = '#f59e0b';
+        $('counter-label').classList.remove('hidden');
+        if (!goalNotified) {
+            goalNotified = true;
             tg.HapticFeedback.notificationOccurred('success');
-            
-            // Pulse effect
-            tapArea.classList.add('goal-reached');
-            setTimeout(() => tapArea.classList.remove('goal-reached'), 1000);
-            
-            // Confetti burst
-            const burst = document.createElement('div');
-            burst.className = 'confetti-burst';
-            tapArea.appendChild(burst);
-            setTimeout(() => burst.remove(), 700);
+            $('tap-area').classList.add('goal-pulse');
+            setTimeout(() => $('tap-area').classList.remove('goal-pulse'), 1000);
+            const b = document.createElement('div'); b.className = 'burst-ring';
+            $('tap-area').appendChild(b); setTimeout(() => b.remove(), 700);
         }
     } else {
-        progressRing.style.stroke = "var(--accent)";
-        label.classList.add('hidden');
+        $('progress-ring').style.stroke = 'var(--accent)';
+        $('counter-label').classList.add('hidden');
     }
 }
 
-// Tap counter
-tapArea.addEventListener('click', () => {
+$('tap-area').addEventListener('click', () => {
     currentCount++;
-    updateCounterUI();
-    if (hapticsEnabled) tg.HapticFeedback.impactOccurred('light');
+    updateUI();
+    haptic('light');
+    // Session timer
+    if (!sessionStart) {
+        sessionStart = Date.now();
+        $('session-timer').classList.remove('hidden');
+        sessionInterval = setInterval(() => {
+            const s = Math.floor((Date.now() - sessionStart) / 1000);
+            $('session-time').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        }, 1000);
+    }
+    // RPM
+    const now = Date.now();
+    tapTimestamps.push(now);
+    tapTimestamps = tapTimestamps.filter(t => now - t < 60000);
+    if (tapTimestamps.length > 2) {
+        $('rpm-label').classList.remove('hidden');
+        $('rpm-label').textContent = `${tapTimestamps.length} z/m`;
+    }
 });
 
-// Reset
-document.getElementById('reset-btn').addEventListener('click', () => {
+$('reset-btn').addEventListener('click', () => {
     if (currentCount === 0) return;
-    tg.showConfirm("Hisoblagichni qayta boshlaysizmi?", (confirmed) => {
-        if (confirmed) {
+    tg.showConfirm("Hisoblagichni qayta boshlaysizmi?", (ok) => {
+        if (ok) {
             currentCount = currentDhikr?._todayCount || 0;
-            goalReachedNotified = currentCount >= (currentDhikr?.daily_target || 0);
-            updateCounterUI();
-            if (hapticsEnabled) tg.HapticFeedback.impactOccurred('rigid');
+            goalNotified = currentCount >= (currentDhikr?.daily_target || 0);
+            updateUI();
+            haptic('rigid');
+            sessionStart = null; tapTimestamps = [];
+            $('session-timer').classList.add('hidden');
+            $('rpm-label').classList.add('hidden');
+            if (sessionInterval) { clearInterval(sessionInterval); sessionInterval = null; }
         }
     });
 });
 
-// -----------------------------------------------------
-// 4. SAVE DATA TO SUPABASE
-// -----------------------------------------------------
+// Quick switch
+$('quick-switch-btn').addEventListener('click', () => {
+    $('sheet-overlay').classList.add('open');
+    $('sheet-panel').classList.add('open');
+    haptic('light');
+    const sl = $('sheet-list');
+    sl.innerHTML = '';
+    allDhikrs.forEach(d => {
+        const isSel = currentDhikr?.id === d.id;
+        const done = allProgress[d.id] || 0;
+        const pct = d.daily_target > 0 ? Math.min(100, Math.round(done / d.daily_target * 100)) : 0;
+        const btn = document.createElement('button');
+        btn.className = `card card-press p-3 flex items-center gap-3 w-full text-left ${isSel ? 'border-emerald-500' : ''}`;
+        btn.innerHTML = `<span class="text-sm font-bold tabular flex-shrink-0" style="color:var(--accent)">${pct}%</span>
+            <span class="font-semibold text-sm flex-1 truncate">${d.title}</span>
+            ${isSel ? '<i class="ph-fill ph-check-circle text-emerald-500"></i>' : '<i class="ph ph-caret-right opacity-15"></i>'}`;
+        btn.onclick = async () => {
+            closeSheet();
+            await selectDhikr(d);
+            haptic('medium');
+        };
+        sl.appendChild(btn);
+    });
+});
+function closeSheet() { $('sheet-overlay').classList.remove('open'); $('sheet-panel').classList.remove('open'); }
+$('sheet-overlay').addEventListener('click', closeSheet);
 
-document.getElementById('save-btn').addEventListener('click', async () => {
+// ===== SAVE =====
+$('save-btn').addEventListener('click', async () => {
     if (!currentDhikr) return;
-    
-    tg.HapticFeedback.impactOccurred('medium');
-    const btn = document.getElementById('save-btn');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = `<i class="ph ph-spinner-gap animate-spin text-xl"></i> Saqlanmoqda...`;
-    
+    haptic('medium');
+    const btn = $('save-btn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="ph ph-spinner-gap animate-spin text-xl"></i> Saqlanmoqda...';
+
     try {
-        const today = todayStr();
-        
-        const { data: existingProg } = await supabaseClient.from('daily_progress')
-            .select('id, count').eq('user_id', userId).eq('dhikr_id', currentDhikr.id).eq('date', today).single();
-        
-        const previouslySaved = existingProg ? (existingProg.count || 0) : 0;
-        const savedBefore = currentDhikr._todayCount || 0;
-        const newTaps = currentCount - savedBefore;
-        
+        const t = today();
+        const { data: ep } = await db.from('daily_progress').select('id, count').eq('user_id', userId).eq('dhikr_id', currentDhikr.id).eq('date', t).single();
+        const prev = ep ? (ep.count || 0) : 0;
+        const saved = currentDhikr._todayCount || 0;
+        const newTaps = currentCount - saved;
+
         if (newTaps <= 0) {
             tg.HapticFeedback.notificationOccurred('warning');
-            btn.innerHTML = `<i class="ph ph-info text-xl"></i> O'zgarish yo'q`;
-            setTimeout(() => { btn.innerHTML = originalText; }, 2000);
-            return;
+            btn.innerHTML = '<i class="ph ph-info text-xl"></i> O\'zgarish yo\'q';
+            setTimeout(() => { btn.innerHTML = orig; }, 2000); return;
         }
-        
-        const newDailyTotal = previouslySaved + newTaps;
-        
-        if (existingProg) {
-            await supabaseClient.from('daily_progress').update({ count: newDailyTotal }).eq('id', existingProg.id);
-        } else {
-            await supabaseClient.from('daily_progress').insert({
-                user_id: userId, dhikr_id: currentDhikr.id, date: today, count: newDailyTotal
-            });
-        }
-        
-        const { data: freshDhikr } = await supabaseClient.from('dhikrs')
-            .select('global_count').eq('id', currentDhikr.id).single();
-        const currentGlobal = freshDhikr ? (freshDhikr.global_count || 0) : 0;
-        const newGlobal = currentGlobal + newTaps;
-        
-        await supabaseClient.from('dhikrs').update({
-            global_count: newGlobal
-        }).eq('id', currentDhikr.id);
-        
+
+        const newDaily = prev + newTaps;
+        if (ep) await db.from('daily_progress').update({ count: newDaily }).eq('id', ep.id);
+        else await db.from('daily_progress').insert({ user_id: userId, dhikr_id: currentDhikr.id, date: t, count: newDaily });
+
+        const { data: fd } = await db.from('dhikrs').select('global_count').eq('id', currentDhikr.id).single();
+        const newGlobal = (fd?.global_count || 0) + newTaps;
+        await db.from('dhikrs').update({ global_count: newGlobal }).eq('id', currentDhikr.id);
+
         currentDhikr.global_count = newGlobal;
-        currentDhikr._todayCount = newDailyTotal;
-        currentCount = newDailyTotal;
-        updateCounterUI();
-        
-        // Update global progress bar
+        currentDhikr._todayCount = newDaily;
+        currentCount = newDaily;
+        updateUI();
+
         if (currentDhikr.global_target > 0) {
-            const globalPercent = Math.min(100, (newGlobal / currentDhikr.global_target) * 100);
-            document.getElementById('global-progress-fill').style.width = `${globalPercent}%`;
-            document.getElementById('global-progress-text').textContent = `${formatNumber(newGlobal)} / ${formatNumber(currentDhikr.global_target)}`;
+            $('global-fill').style.width = `${Math.min(100, newGlobal / currentDhikr.global_target * 100)}%`;
+            $('global-text').textContent = `${fmt(newGlobal)} / ${fmt(currentDhikr.global_target)}`;
         }
-        
+
         tg.HapticFeedback.notificationOccurred('success');
-        btn.innerHTML = `<i class="ph ph-check text-xl"></i> +${formatNumber(newTaps)} saqlandi!`;
-        
-        tg.sendData(JSON.stringify({
-            action: 'save_dhikr',
-            title: currentDhikr.title,
-            count: newDailyTotal,
-            target: currentDhikr.daily_target
-        }));
-        
+        btn.innerHTML = `<i class="ph ph-check text-xl"></i> +${fmt(newTaps)} saqlandi!`;
+        tg.sendData(JSON.stringify({ action: 'save_dhikr', title: currentDhikr.title, count: newDaily, target: currentDhikr.daily_target }));
     } catch (err) {
         console.error(err);
         tg.HapticFeedback.notificationOccurred('error');
-        btn.innerHTML = `<i class="ph ph-warning text-xl"></i> Xatolik`;
+        btn.innerHTML = '<i class="ph ph-warning text-xl"></i> Xatolik';
     }
-    
-    setTimeout(() => { btn.innerHTML = originalText; }, 2500);
+    setTimeout(() => { btn.innerHTML = orig; }, 2500);
 });
 
-// Profile Hard Reset
-document.getElementById('hard-reset-btn').addEventListener('click', async () => {
-    tg.showConfirm("Rostdan ham barcha statistika va zikrlarni o'chirasizmi? Bu amalni ortga qaytarib bo'lmaydi.", async (confirmed) => {
-        if (confirmed) {
-            await supabaseClient.from('dhikrs').delete().eq('user_id', userId);
-            await supabaseClient.from('daily_progress').delete().eq('user_id', userId);
-            await supabaseClient.from('duas').delete().eq('user_id', userId);
+$('hard-reset').addEventListener('click', async () => {
+    tg.showConfirm("Barcha ma'lumotlarni o'chirasizmi? Ortga qaytarib bo'lmaydi!", async (ok) => {
+        if (ok) {
+            await db.from('dhikrs').delete().eq('user_id', userId);
+            await db.from('daily_progress').delete().eq('user_id', userId);
             tg.close();
         }
     });
 });
 
-// -----------------------------------------------------
-// 5. REMINDERS LOGIC
-// -----------------------------------------------------
+// ===== STATS =====
+let chartRange = 7;
+let allDailyTotals = {};
 
+document.querySelectorAll('[data-range]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        chartRange = parseInt(btn.dataset.range);
+        renderChart();
+    });
+});
+
+async function fetchStats() {
+    $('stat-daily').innerHTML = '<div class="skel h-5 w-10 mx-auto mt-0.5"></div>';
+    $('stat-global').innerHTML = '<div class="skel h-5 w-14 mx-auto mt-0.5"></div>';
+
+    const [{ data: dhikrs }, { data: tp }, { data: progress }] = await Promise.all([
+        db.from('dhikrs').select('id, title, global_count, daily_target').eq('user_id', userId),
+        db.from('daily_progress').select('count').eq('user_id', userId).eq('date', today()),
+        db.from('daily_progress').select('date, count, dhikr_id').eq('user_id', userId).order('date', { ascending: false }).limit(500)
+    ]);
+
+    let totalDaily = 0, totalGlobal = 0, topD = { title: "Yo'q", c: -1 };
+    if (tp) tp.forEach(p => { totalDaily += p.count || 0; });
+    if (dhikrs) dhikrs.forEach(d => {
+        totalGlobal += d.global_count || 0;
+        if ((d.global_count || 0) > topD.c) topD = { title: d.title, c: d.global_count || 0 };
+    });
+
+    animNum('stat-daily', totalDaily);
+    animNum('stat-global', totalGlobal);
+    $('stat-top').textContent = topD.c > 0 ? topD.title : "Hali yo'q";
+
+    // Build daily totals map
+    allDailyTotals = {};
+    const perDhikrToday = {};
+    if (progress) progress.forEach(p => {
+        allDailyTotals[p.date] = (allDailyTotals[p.date] || 0) + p.count;
+        if (p.date === today()) {
+            const did = p.dhikr_id;
+            perDhikrToday[did] = (perDhikrToday[did] || 0) + p.count;
+        }
+    });
+
+    // Streak
+    let streak = 0, cd = new Date(), cs = isoDate(cd);
+    if (!allDailyTotals[cs]) { cd.setDate(cd.getDate() - 1); cs = isoDate(cd); }
+    while (allDailyTotals[cs] > 0) { streak++; cd.setDate(cd.getDate() - 1); cs = isoDate(cd); }
+    $('stat-streak').textContent = `${streak} kun`;
+
+    // Best day
+    let bestDay = 0;
+    Object.values(allDailyTotals).forEach(v => { if (v > bestDay) bestDay = v; });
+    $('stat-best-day').textContent = fmt(bestDay);
+
+    // Motivation
+    if (streak > 0) {
+        $('motivation-banner').classList.remove('hidden');
+        const msgs = [
+            `🔥 ${streak} kunlik seriya! Davom eting!`,
+            `💪 ${streak} kun ketma-ket! Ajoyib!`,
+            `🌟 ${streak} kundan beri to'xtamagansiz!`
+        ];
+        $('motivation-text').textContent = msgs[streak % msgs.length];
+    } else { $('motivation-banner').classList.add('hidden'); }
+
+    renderChart();
+
+    // Per-dhikr breakdown
+    const pd = $('per-dhikr');
+    if (dhikrs && dhikrs.length > 0) {
+        const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316'];
+        pd.innerHTML = '';
+        dhikrs.forEach((d, i) => {
+            const done = perDhikrToday[d.id] || 0; // This won't work because we don't have d.id from the query
+            const pct = d.daily_target > 0 ? Math.min(100, Math.round(done / d.daily_target * 100)) : 0;
+            const color = colors[i % colors.length];
+            const row = document.createElement('div');
+            row.className = 'p-3 border-b border-[var(--border)] last:border-0';
+            row.innerHTML = `
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold truncate flex-1">${d.title}</span>
+                    <span class="text-[10px] font-bold tabular opacity-50">${fmt(d.global_count || 0)} jami</span>
+                </div>
+                <div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>`;
+            pd.appendChild(row);
+        });
+    }
+
+    // Heat map (7 weeks)
+    renderHeatMap();
+}
+
+function renderChart() {
+    const bars = $('chart-bars');
+    const labels = $('chart-labels');
+    bars.innerHTML = ''; labels.innerHTML = '';
+    const dayNames = ['Yak', 'Du', 'Se', 'Cho', 'Pay', 'Ju', 'Sha'];
+    const data = [];
+    for (let i = chartRange - 1; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = isoDate(d);
+        data.push({ date: ds, day: dayNames[d.getDay()], count: allDailyTotals[ds] || 0, isToday: i === 0 });
+    }
+    const max = Math.max(...data.map(d => d.count), 1);
+
+    data.forEach((day, idx) => {
+        const h = day.count > 0 ? Math.max(12, (day.count / max) * 100) : 4;
+        const bar = document.createElement('div');
+        bar.className = 'flex-1 rounded-t-md chart-bar relative';
+        bar.style.height = '0%';
+        bar.style.background = day.isToday ? 'var(--accent)' : day.count > 0 ? 'var(--accent-dim)' : 'var(--border)';
+        bar.style.opacity = day.isToday ? '1' : day.count > 0 ? '0.6' : '0.25';
+
+        if (day.count > 0) {
+            const lbl = document.createElement('span');
+            lbl.className = 'absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] font-bold tabular';
+            lbl.style.color = 'var(--muted)';
+            lbl.textContent = fmt(day.count);
+            bar.appendChild(lbl);
+        }
+        bars.appendChild(bar);
+        setTimeout(() => { bar.style.height = `${h}%`; }, 50 + idx * 50);
+
+        const le = document.createElement('span');
+        le.className = `flex-1 text-center ${day.isToday ? 'font-extrabold' : ''}`;
+        le.style.color = day.isToday ? 'var(--accent)' : '';
+        le.textContent = day.isToday ? 'Bugun' : day.day;
+        labels.appendChild(le);
+    });
+}
+
+function renderHeatMap() {
+    const hm = $('heat-map');
+    hm.innerHTML = '';
+    const cells = [];
+    for (let i = 48; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = isoDate(d);
+        cells.push({ date: ds, count: allDailyTotals[ds] || 0 });
+    }
+    const max = Math.max(...cells.map(c => c.count), 1);
+    cells.forEach(c => {
+        const el = document.createElement('div');
+        el.className = 'heat-cell';
+        if (c.count === 0) {
+            el.style.background = 'var(--border)';
+            el.style.opacity = '0.3';
+        } else {
+            const intensity = Math.min(1, c.count / max);
+            const alpha = 0.15 + intensity * 0.85;
+            el.style.background = `rgba(16, 185, 129, ${alpha})`;
+        }
+        el.title = `${c.date}: ${c.count}`;
+        el.addEventListener('click', () => {
+            tg.showAlert(`📅 ${c.date}\n📿 ${fmt(c.count)} marta zikr`);
+        });
+        hm.appendChild(el);
+    });
+}
+
+function animNum(id, target) {
+    const el = $(id);
+    if (!el) return;
+    const dur = 500, start = performance.now();
+    function u(now) {
+        const p = Math.min((now - start) / dur, 1);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(Math.round(target * e));
+        if (p < 1) requestAnimationFrame(u);
+    }
+    requestAnimationFrame(u);
+}
+
+// ===== REMINDERS =====
 async function fetchReminders() {
-    const listEl = document.getElementById('reminders-list');
-    const loadingEl = document.getElementById('reminders-loading');
-    if(!listEl) return;
-    
-    loadingEl.classList.remove('hidden');
-    
+    const list = $('rem-list');
+    $('rem-loading').classList.remove('hidden');
     try {
-        const { data: reminders, error } = await supabaseClient.from('user_reminders')
-            .select('*')
-            .eq('user_id', userId)
-            .order('time', { ascending: true });
-            
-        if (error) throw error;
-        
-        listEl.innerHTML = '';
-        
-        if (reminders && reminders.length > 0) {
-            reminders.forEach(r => {
-                const typeIcon = r.type === 'dua' ? 'ph-hands-praying' : r.type === 'prayer_reminder' ? 'ph-mosque' : 'ph-clock';
-                const typeColor = r.type === 'dua' ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : r.type === 'prayer_reminder' ? 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20';
-                
-                listEl.innerHTML += `
-                    <div class="p-4 flex items-center justify-between border-b border-[var(--border)]">
-                        <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-full ${typeColor} flex items-center justify-center">
-                                <i class="ph ${typeIcon} text-lg"></i>
-                            </div>
-                            <div>
-                                <span class="font-bold text-lg tabular-nums">${r.time}</span>
-                                ${r.label ? `<span class="text-[10px] opacity-50 block">${r.label}</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" class="sr-only peer" ${r.is_active ? 'checked' : ''} onchange="toggleReminder(${r.id}, this.checked)">
-                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                            </label>
-                            <button onclick="deleteReminder(${r.id})" class="text-red-400 p-1.5 rounded-lg active:bg-red-50 dark:active:bg-red-900/20 transition-colors">
-                                <i class="ph ph-trash text-sm"></i>
-                            </button>
-                        </div>
+        const { data: rems } = await db.from('user_reminders').select('*').eq('user_id', userId).order('time', { ascending: true });
+        list.innerHTML = '';
+        if (rems?.length > 0) {
+            rems.forEach(r => {
+                list.innerHTML += `<div class="p-3.5 flex items-center justify-between border-b border-[var(--border)]">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-full flex items-center justify-center" style="background:var(--secondary-dim);color:var(--secondary)"><i class="ph ph-clock text-lg"></i></div>
+                        <span class="font-bold text-base tabular">${r.time}</span>
                     </div>
-                `;
+                    <div class="flex items-center gap-2">
+                        <label class="toggle"><input type="checkbox" ${r.is_active ? 'checked' : ''} onchange="toggleRem(${r.id},this.checked)"><div class="toggle-track"></div><div class="toggle-thumb"></div></label>
+                        <button onclick="deleteRem(${r.id})" class="text-red-400 p-1 rounded-lg active:bg-red-50 dark:active:bg-red-900/20"><i class="ph ph-trash text-sm"></i></button>
+                    </div></div>`;
             });
         } else {
-            listEl.innerHTML = `<div class="p-6 text-center text-sm opacity-40">Hali hech qanday eslatma qo'shilmagan</div>`;
+            list.innerHTML = '<div class="p-5 text-center text-xs opacity-30">Hali eslatma qo\'shilmagan</div>';
         }
-    } catch (e) {
-        console.error(e);
-        listEl.innerHTML = `<div class="p-4 text-center text-sm text-red-500">Xatolik yuz berdi</div>`;
-    } finally {
-        loadingEl.classList.add('hidden');
-    }
+    } catch (e) { console.error(e); list.innerHTML = '<div class="p-4 text-center text-xs text-red-500">Xatolik</div>'; }
+    finally { $('rem-loading').classList.add('hidden'); }
 }
 
-async function addReminder(timeStr) {
-    tg.HapticFeedback.impactOccurred('light');
-    document.getElementById('reminders-loading').classList.remove('hidden');
-    try {
-        await supabaseClient.from('user_reminders').insert({
-            user_id: userId,
-            time: timeStr,
-            is_active: true
-        });
-        fetchReminders();
-    } catch(e) {
-        console.error(e);
-        document.getElementById('reminders-loading').classList.add('hidden');
-    }
-}
-
-window.toggleReminder = async function(id, isActive) {
-    tg.HapticFeedback.impactOccurred('light');
-    try {
-        await supabaseClient.from('user_reminders').update({ is_active: isActive }).eq('id', id);
-    } catch(e) {
-        console.error(e);
-        fetchReminders();
-    }
-};
-
-window.deleteReminder = async function(id) {
-    tg.showConfirm("Ushbu eslatmani o'chirib tashlaysizmi?", async (confirmed) => {
-        if (confirmed) {
-            tg.HapticFeedback.impactOccurred('medium');
-            document.getElementById('reminders-loading').classList.remove('hidden');
-            await supabaseClient.from('user_reminders').delete().eq('id', id);
-            fetchReminders();
-        }
+window.toggleRem = async (id, on) => { haptic('light'); await db.from('user_reminders').update({ is_active: on }).eq('id', id); };
+window.deleteRem = (id) => {
+    tg.showConfirm("Eslatmani o'chirasizmi?", async (ok) => {
+        if (ok) { haptic('medium'); await db.from('user_reminders').delete().eq('id', id); fetchReminders(); }
     });
 };
+$('rem-time')?.addEventListener('change', async (e) => {
+    if (e.target.value) {
+        haptic('light');
+        $('rem-loading').classList.remove('hidden');
+        await db.from('user_reminders').insert({ user_id: userId, time: e.target.value, is_active: true });
+        e.target.value = '';
+        fetchReminders();
+    }
+});
 
-const timeInput = document.getElementById('reminder-time-input');
-if (timeInput) {
-    timeInput.addEventListener('change', (e) => {
-        if (e.target.value) {
-            addReminder(e.target.value);
-            e.target.value = '';
-        }
-    });
-}
-
-// -----------------------------------------------------
-// 6. PRAYER TIMES LOGIC
-// -----------------------------------------------------
-
-const PRAYER_NAMES = {
-    fajr: { name: 'Bomdod', emoji: '🌅' },
-    dhuhr: { name: 'Peshin', emoji: '☀️' },
-    asr: { name: 'Asr', emoji: '🌤' },
-    maghrib: { name: 'Shom', emoji: '🌆' },
-    isha: { name: 'Xufton', emoji: '🌙' },
-};
+// ===== PRAYER TIMES =====
+const PRAYER_NAMES = { fajr: { n: 'Bomdod', e: '🌅' }, dhuhr: { n: 'Peshin', e: '☀️' }, asr: { n: 'Asr', e: '🌤' }, maghrib: { n: 'Shom', e: '🌆' }, isha: { n: 'Xufton', e: '🌙' } };
+let prayerCountdownInterval = null;
 
 async function fetchPrayerTimes() {
-    const loadingEl = document.getElementById('prayer-loading');
-    const listEl = document.getElementById('prayer-times-list');
-    const cityEl = document.getElementById('prayer-city');
-    if (!listEl) return;
-    
-    loadingEl?.classList.remove('hidden');
-    
+    $('prayer-loading')?.classList.remove('hidden');
+    const list = $('prayer-list');
     try {
-        const { data: user } = await supabaseClient.from('users').select('city, prayer_notifications').eq('user_id', userId).single();
+        const { data: user } = await db.from('users').select('city, prayer_notifications').eq('user_id', userId).single();
         const city = user?.city || 'Toshkent';
-        const prayerOn = user?.prayer_notifications ?? true;
-        
-        const prayerToggle = document.getElementById('prayer-toggle');
-        if (prayerToggle) prayerToggle.checked = prayerOn;
-        
-        cityEl.textContent = `📍 ${city}`;
-        
-        const today = todayStr();
-        const { data: cached } = await supabaseClient.from('prayer_cache')
-            .select('*').eq('city', city).eq('date', today).single();
-        
+        $('prayer-toggle').checked = user?.prayer_notifications ?? true;
+        $('prayer-city').textContent = `📍 ${city}`;
+
+        const t = today();
+        const { data: cached } = await db.from('prayer_cache').select('*').eq('city', city).eq('date', t).single();
         let times;
         if (cached) {
-            times = {
-                fajr: cached.fajr, dhuhr: cached.dhuhr, asr: cached.asr,
-                maghrib: cached.maghrib, isha: cached.isha,
-            };
+            times = { fajr: cached.fajr, dhuhr: cached.dhuhr, asr: cached.asr, maghrib: cached.maghrib, isha: cached.isha };
         } else {
-            const CITIES = {
-                "Toshkent": [41.2995, 69.2401], "Samarqand": [39.6542, 66.9597],
-                "Buxoro": [39.7681, 64.4556], "Andijon": [40.7821, 72.3442],
-                "Namangan": [40.9983, 71.6726], "Farg'ona": [40.3834, 71.7870],
-                "Nukus": [42.4628, 59.6003], "Qarshi": [38.8610, 65.8004],
-                "Jizzax": [40.1158, 67.8422], "Urganch": [41.5533, 60.6236],
-                "Navoiy": [40.1034, 65.3792], "Termiz": [37.2241, 67.2783],
-                "Chirchiq": [41.4689, 69.5828], "Kokand": [40.5286, 70.9425],
-            };
-            const coords = CITIES[city] || CITIES["Toshkent"];
+            const CITIES = { "Toshkent":[41.2995,69.2401],"Samarqand":[39.6542,66.9597],"Buxoro":[39.7681,64.4556],"Andijon":[40.7821,72.3442],"Namangan":[40.9983,71.6726],"Farg'ona":[40.3834,71.787],"Nukus":[42.4628,59.6003],"Qarshi":[38.861,65.8004],"Jizzax":[40.1158,67.8422],"Urganch":[41.5533,60.6236],"Navoiy":[40.1034,65.3792],"Termiz":[37.2241,67.2783],"Chirchiq":[41.4689,69.5828],"Kokand":[40.5286,70.9425] };
+            const c = CITIES[city] || CITIES["Toshkent"];
             const d = new Date();
-            const dateStr = `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
-            
-            const resp = await fetch(`https://api.aladhan.com/v1/timings/${dateStr}?latitude=${coords[0]}&longitude=${coords[1]}&method=3`);
-            const data = await resp.json();
-            const t = data.data.timings;
-            
-            times = {
-                fajr: t.Fajr.slice(0, 5), dhuhr: t.Dhuhr.slice(0, 5), asr: t.Asr.slice(0, 5),
-                maghrib: t.Maghrib.slice(0, 5), isha: t.Isha.slice(0, 5),
-            };
+            const ds = `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+            const r = await fetch(`https://api.aladhan.com/v1/timings/${ds}?latitude=${c[0]}&longitude=${c[1]}&method=3`);
+            const data = await r.json();
+            const tm = data.data.timings;
+            times = { fajr: tm.Fajr.slice(0,5), dhuhr: tm.Dhuhr.slice(0,5), asr: tm.Asr.slice(0,5), maghrib: tm.Maghrib.slice(0,5), isha: tm.Isha.slice(0,5) };
         }
-        
-        // Render prayer times
-        listEl.innerHTML = '';
+
+        list.innerHTML = '';
         const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        let nextPrayerFound = false;
-        
+        const curMin = now.getHours() * 60 + now.getMinutes();
+        let nextFound = false, nextPrayerMin = null, nextPrayerName = '';
+
         for (const [key, info] of Object.entries(PRAYER_NAMES)) {
             const time = times[key] || '--:--';
             const [h, m] = time.split(':').map(Number);
-            const prayerMinutes = h * 60 + m;
-            const isPast = prayerMinutes <= currentMinutes;
-            const isNext = !isPast && !nextPrayerFound;
-            
-            if (isNext) nextPrayerFound = true;
-            
-            // Calculate time remaining for next prayer
-            let remaining = '';
-            if (isNext) {
-                const diff = prayerMinutes - currentMinutes;
-                const hrs = Math.floor(diff / 60);
-                const mins = diff % 60;
-                remaining = hrs > 0 ? `${hrs} soat ${mins} min` : `${mins} min`;
-            }
-            
+            const pm = h * 60 + m;
+            const past = pm <= curMin;
+            const isNext = !past && !nextFound;
+            if (isNext) { nextFound = true; nextPrayerMin = pm; nextPrayerName = info.n; }
+
             const div = document.createElement('div');
-            div.className = `p-4 flex items-center justify-between border-b border-[var(--border)] transition-colors ${isNext ? 'next-prayer' : isPast ? 'opacity-40' : ''}`;
-            div.innerHTML = `
-                <div class="flex items-center gap-3">
-                    <span class="text-xl">${info.emoji}</span>
-                    <div>
-                        <span class="font-medium text-sm">${info.name}</span>
-                        ${isNext ? `<span class="text-[10px] block font-semibold" style="color: var(--accent);">${remaining} qoldi</span>` : ''}
-                    </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <span class="font-bold text-sm tabular-nums">${time}</span>
-                    ${isPast ? '<i class="ph-fill ph-check-circle text-emerald-500 text-sm"></i>' : ''}
-                    ${isNext ? '<i class="ph-fill ph-arrow-right text-xs" style="color: var(--accent);"></i>' : ''}
-                </div>
-            `;
-            listEl.appendChild(div);
+            div.className = `p-3 flex items-center justify-between border-b border-[var(--border)] ${isNext ? 'next-prayer' : past ? 'opacity-35' : ''}`;
+            let remaining = '';
+            if (isNext) { const diff = pm - curMin; remaining = diff >= 60 ? `${Math.floor(diff/60)}s ${diff%60}m` : `${diff} min`; }
+            div.innerHTML = `<div class="flex items-center gap-2.5"><span class="text-lg">${info.e}</span><div><span class="font-medium text-sm">${info.n}</span>${isNext ? `<span class="text-[9px] block font-bold" style="color:var(--accent)">${remaining} qoldi</span>` : ''}</div></div>
+                <div class="flex items-center gap-1.5"><span class="font-bold text-sm tabular">${time}</span>${past ? '<i class="ph-fill ph-check-circle text-emerald-500 text-xs"></i>' : ''}${isNext ? '<i class="ph-fill ph-arrow-right text-xs" style="color:var(--accent)"></i>' : ''}</div>`;
+            list.appendChild(div);
         }
-        
-    } catch (e) {
-        console.error('Prayer times error:', e);
-        listEl.innerHTML = `<div class="p-4 text-center text-sm opacity-40">Namoz vaqtlarini yuklashda xatolik</div>`;
-    } finally {
-        loadingEl?.classList.add('hidden');
-    }
+
+        // Countdown
+        if (nextPrayerMin !== null) {
+            $('prayer-countdown-bar').classList.remove('hidden');
+            if (prayerCountdownInterval) clearInterval(prayerCountdownInterval);
+            function updateCountdown() {
+                const n = new Date();
+                const cm = n.getHours() * 60 + n.getMinutes();
+                const cs = n.getSeconds();
+                const diffSec = (nextPrayerMin - cm) * 60 - cs;
+                if (diffSec <= 0) { $('prayer-countdown').textContent = `${nextPrayerName} vaqti!`; clearInterval(prayerCountdownInterval); return; }
+                const mm = Math.floor(diffSec / 60);
+                const ss = diffSec % 60;
+                $('prayer-countdown').textContent = `${nextPrayerName} — ${mm}:${String(ss).padStart(2, '0')}`;
+            }
+            updateCountdown();
+            prayerCountdownInterval = setInterval(updateCountdown, 1000);
+        } else { $('prayer-countdown-bar').classList.add('hidden'); }
+
+    } catch (e) { console.error(e); list.innerHTML = '<div class="p-4 text-center text-xs opacity-30">Xatolik</div>'; }
+    finally { $('prayer-loading')?.classList.add('hidden'); }
 }
 
-// Prayer notification toggle
-const prayerToggle = document.getElementById('prayer-toggle');
-if (prayerToggle) {
-    prayerToggle.addEventListener('change', async (e) => {
-        tg.HapticFeedback.impactOccurred('light');
-        
-        // Update chip
-        const chip = document.getElementById('profile-prayer-status');
-        if (e.target.checked) {
-            chip.textContent = 'Namoz ✓';
-            document.getElementById('profile-prayer-chip').style.background = 'var(--accent-dim)';
-            document.getElementById('profile-prayer-chip').style.color = 'var(--accent)';
-        } else {
-            chip.textContent = 'Namoz ✗';
-            document.getElementById('profile-prayer-chip').style.background = 'rgba(239,68,68,0.1)';
-            document.getElementById('profile-prayer-chip').style.color = '#ef4444';
-        }
-        
-        try {
-            await supabaseClient.from('users').update({ 
-                prayer_notifications: e.target.checked 
-            }).eq('user_id', userId);
-        } catch(err) {
-            console.error(err);
-            e.target.checked = !e.target.checked;
-        }
-    });
-}
+$('prayer-toggle')?.addEventListener('change', async (e) => {
+    haptic('light');
+    const on = e.target.checked;
+    $('chip-prayer-text').textContent = on ? 'Namoz ✓' : 'Namoz ✗';
+    $('chip-prayer').style.background = on ? 'var(--accent-dim)' : 'rgba(239,68,68,0.1)';
+    $('chip-prayer').style.color = on ? 'var(--accent)' : '#ef4444';
+    await db.from('users').update({ prayer_notifications: on }).eq('user_id', userId);
+});
 
-document.getElementById('refresh-prayer-btn')?.addEventListener('click', () => {
-    tg.HapticFeedback.impactOccurred('light');
+$('refresh-prayer')?.addEventListener('click', () => { haptic('light'); fetchPrayerTimes(); });
+
+// City select
+$('city-select')?.addEventListener('change', async (e) => {
+    haptic('medium');
+    const city = e.target.value;
+    $('chip-city-text').textContent = city;
+    await db.from('users').update({ city }).eq('user_id', userId);
     fetchPrayerTimes();
 });
 
-// -----------------------------------------------------
-// 7. DAILY DUA LOGIC
-// -----------------------------------------------------
-
+// ===== DUAS =====
 let allDuas = [];
-let currentDuaIndex = 0;
+let duaIdx = 0;
 
 async function fetchDuas() {
-    const loadingEl = document.getElementById('dua-loading');
-    const contentEl = document.getElementById('dua-content');
-    if (!contentEl) return;
-    
     try {
-        const { data: duas } = await supabaseClient.from('duas')
-            .select('*')
-            .eq('user_id', userId)
-            .eq('is_active', true)
-            .order('id');
-        
-        if (duas && duas.length > 0) {
-            allDuas = duas;
-            currentDuaIndex = Math.floor(Math.random() * duas.length);
-            showDua(currentDuaIndex);
+        const { data } = await db.from('duas').select('*').eq('user_id', userId).eq('is_active', true).order('id');
+        if (data?.length > 0) {
+            allDuas = data;
+            duaIdx = Math.floor(Math.random() * data.length);
+            showDua(duaIdx);
         } else {
-            loadingEl?.classList.add('hidden');
-            contentEl.classList.remove('hidden');
-            document.getElementById('dua-arabic').classList.add('hidden');
-            document.getElementById('dua-text').textContent = "Hali duo qo'shilmagan. Bot orqali duo qo'shing.";
-            document.getElementById('dua-meaning').textContent = '';
+            $('dua-loading')?.classList.add('hidden');
+            $('dua-content').classList.remove('hidden');
+            $('dua-arabic').classList.add('hidden');
+            $('dua-text').textContent = "Duo qo'shilmagan. Bot orqali qo'shing.";
+            $('dua-cat-badge').textContent = '';
+            $('dua-counter').textContent = '';
         }
-    } catch (e) {
-        console.error('Duas fetch error:', e);
-        loadingEl?.classList.add('hidden');
-        contentEl.classList.remove('hidden');
-        document.getElementById('dua-text').textContent = "Duolarni yuklashda xatolik.";
-    }
+    } catch (e) { console.error(e); }
 }
 
-function showDua(index) {
-    const loadingEl = document.getElementById('dua-loading');
-    const contentEl = document.getElementById('dua-content');
-    if (!allDuas.length || !contentEl) return;
-    
-    const dua = allDuas[index % allDuas.length];
-    
-    loadingEl?.classList.add('hidden');
-    contentEl.classList.remove('hidden');
-    
-    const arabicEl = document.getElementById('dua-arabic');
-    const textEl = document.getElementById('dua-text');
-    const meaningEl = document.getElementById('dua-meaning');
-    
-    if (dua.arabic && dua.arabic.length > 0) {
-        arabicEl.textContent = dua.arabic;
-        arabicEl.classList.remove('hidden');
-    } else {
-        arabicEl.classList.add('hidden');
-    }
-    
-    textEl.textContent = dua.text || '';
-    meaningEl.textContent = '';
-    
-    // Category badge
-    const catNames = {
-        morning: '🌅 Tonggi', evening: '🌙 Kechki', pre_prayer: '🕌 Namoz',
-        bedtime: '🛏 Uxlashdan oldin', general: '📿 Umumiy', custom: '✍️ Shaxsiy'
-    };
-    if (dua.category && catNames[dua.category]) {
-        meaningEl.textContent = catNames[dua.category];
-    }
-    
-    // Slide animation
-    contentEl.style.opacity = '0';
-    contentEl.style.transform = 'translateY(6px)';
+function showDua(idx) {
+    if (!allDuas.length) return;
+    const dua = allDuas[idx % allDuas.length];
+    $('dua-loading')?.classList.add('hidden');
+    $('dua-content').classList.remove('hidden');
+
+    if (dua.arabic?.trim()) { $('dua-arabic').textContent = dua.arabic; $('dua-arabic').classList.remove('hidden'); }
+    else { $('dua-arabic').classList.add('hidden'); }
+
+    $('dua-text').textContent = dua.text || '';
+    $('dua-counter').textContent = `${(idx % allDuas.length) + 1}/${allDuas.length}`;
+
+    const cats = { morning: '🌅 Tonggi', evening: '🌙 Kechki', pre_prayer: '🕌 Namoz', bedtime: '🛏 Uxlash', general: '📿 Umumiy', custom: '✍️ Shaxsiy' };
+    $('dua-cat-badge').textContent = cats[dua.category] || '📿 Duo';
+
+    $('dua-content').style.opacity = '0';
+    $('dua-content').style.transform = 'translateY(4px)';
     requestAnimationFrame(() => {
-        contentEl.style.transition = 'all 0.3s ease';
-        contentEl.style.opacity = '1';
-        contentEl.style.transform = 'translateY(0)';
+        $('dua-content').style.transition = 'all 0.25s ease';
+        $('dua-content').style.opacity = '1';
+        $('dua-content').style.transform = 'translateY(0)';
     });
 }
 
-document.getElementById('next-dua-btn')?.addEventListener('click', () => {
-    if (allDuas.length > 1) {
-        tg.HapticFeedback.impactOccurred('light');
-        currentDuaIndex = (currentDuaIndex + 1) % allDuas.length;
-        showDua(currentDuaIndex);
-    }
-});
+$('next-dua')?.addEventListener('click', () => { if (allDuas.length > 1) { haptic('light'); duaIdx = (duaIdx + 1) % allDuas.length; showDua(duaIdx); } });
+$('prev-dua')?.addEventListener('click', () => { if (allDuas.length > 1) { haptic('light'); duaIdx = (duaIdx - 1 + allDuas.length) % allDuas.length; showDua(duaIdx); } });
 
-// Start
+// START
 initApp();

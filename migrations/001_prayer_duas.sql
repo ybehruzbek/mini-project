@@ -48,6 +48,6 @@ CREATE INDEX IF NOT EXISTS idx_duas_category ON duas(category);
 CREATE INDEX IF NOT EXISTS idx_prayer_cache_city_date ON prayer_cache(city, date);
 CREATE INDEX IF NOT EXISTS idx_user_reminders_type ON user_reminders(type);
 
--- 6. RLS policies (ixtiyoriy — agar RLS yoqilgan bo'lsa)
--- ALTER TABLE duas ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE prayer_cache ENABLE ROW LEVEL SECURITY;
+-- 6. RLS xavfsizligini o'chirish (Bot ma'lumot yoza olishi uchun)
+ALTER TABLE duas DISABLE ROW LEVEL SECURITY;
+ALTER TABLE prayer_cache DISABLE ROW LEVEL SECURITY;
