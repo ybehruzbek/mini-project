@@ -1,19 +1,30 @@
 import asyncio
 import logging
 import os
-import sqlite3
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram.types.web_app_info import WebAppInfo
 from datetime import datetime, timedelta
 import math
 import random
 from dotenv import load_dotenv
-from database import init_db, save_user_data, add_default_dhikr, get_user, supabase
+from database import (
+    init_db, save_user_data, add_default_dhikr, get_user, get_user_full,
+    supabase, add_default_duas, get_user_duas, get_active_duas,
+    toggle_dua, delete_dua, add_custom_dua,
+    get_cached_prayer_times, save_prayer_cache, get_users_by_city, get_all_active_cities
+)
+from prayer import (
+    UZBEK_CITIES, PRAYER_NAMES, PRAYER_EMOJIS,
+    fetch_prayer_times, compute_notify_time, format_prayer_times_message
+)
+from duas_data import (
+    get_random_dua, get_prayer_dua_category, format_dua_message,
+    MORNING_DUAS, EVENING_DUAS
+)
 
 ADMIN_ID = 1277687464
 
@@ -23,20 +34,25 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 # Loggingni sozlash
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Bot va Dispatcher yaratish
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Vaqtincha Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=8"
+# Web App URL
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=9"
 
-# Anketa holatlari (States)
+# ==========================================
+# --- FSM States ---
+# ==========================================
+
 class Onboarding(StatesGroup):
     name = State()
     age = State()
     gender = State()
     habit = State()
+    city = State()
 
 class CustomDhikr(StatesGroup):
     title = State()
@@ -53,12 +69,23 @@ class LogDhikr(StatesGroup):
 
 class SettingsState(StatesGroup):
     change_name = State()
+    change_city = State()
+
+class DuaState(StatesGroup):
+    text = State()
+    category = State()
+
+
+# ==========================================
+# --- Keyboard Helpers ---
+# ==========================================
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
         [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text="🤲 Zikrlarni ko'rish", callback_data="view_dhikrs")],
+        [InlineKeyboardButton(text="🕌 Duo'lar", callback_data="view_duas")],
         [InlineKeyboardButton(text="📊 Mening statistikam", callback_data="view_stats")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="settings")]
     ])
@@ -89,10 +116,63 @@ def get_global_target_keyboard(prefix):
         [InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data=f"{prefix}_global_manual")]
     ])
 
+def get_city_keyboard():
+    """O'zbekiston shaharlari ro'yxati"""
+    cities = sorted(UZBEK_CITIES.keys())
+    keyboard = []
+    row = []
+    for city in cities:
+        row.append(InlineKeyboardButton(text=city, callback_data=f"city_{city}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+# ==========================================
+# --- Web App Data Handler ---
+# ==========================================
+
+@dp.message(F.web_app_data)
+async def web_app_data_handler(message: types.Message):
+    """Web App (Elektron Tasbeh) dan kelgan ma'lumotlarni qabul qilish"""
+    import json
+    try:
+        data = json.loads(message.web_app_data.data)
+        action = data.get('action')
+        
+        if action == 'save_dhikr':
+            title = data.get('title', 'Zikr')
+            count = data.get('count', 0)
+            target = data.get('target', 0)
+            
+            if count >= target and target > 0:
+                text = (
+                    f"🎉 <b>Mashaa'Alloh!</b>\n\n"
+                    f"📿 <b>{title}</b> — bugungi maqsadga yetdingiz!\n"
+                    f"✅ Qilingan: <b>{count}</b> / {target}\n\n"
+                    f"<i>Alloh taolo qabul qilsin! 🤲</i>"
+                )
+            else:
+                text = (
+                    f"✅ <b>Saqlandi!</b>\n\n"
+                    f"📿 <b>{title}</b>\n"
+                    f"📊 Bugungi holat: <b>{count}</b> / {target}\n\n"
+                    f"<i>Davom eting, baraka topasiz inshaalloh! 🌿</i>"
+                )
+            
+            await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Web App data xatosi: {e}")
+
+# ==========================================
+# --- Onboarding (Ro'yxatdan o'tish) ---
+# ==========================================
 
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message, state: FSMContext) -> None:
-    # Eski foydalanuvchi ekanligini tekshiramiz
     user = get_user(message.from_user.id)
     if user:
         name = user[0]
@@ -103,7 +183,6 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
         )
         return
 
-    # Yangi foydalanuvchi bo'lsa, anketa boshlanadi
     first_name = message.from_user.first_name
     
     await message.answer(
@@ -123,7 +202,6 @@ async def command_start_handler(message: types.Message, state: FSMContext) -> No
     )
     await state.set_state(Onboarding.name)
 
-# Yosh so'rash uchun umumiy funksiya (kodni qayta ishlatish uchun)
 async def ask_for_age(target_message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌱 20 yoshgacha", callback_data="age_under20")],
@@ -178,11 +256,25 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
     habit = callback.data.split("_")[1]
     await state.update_data(habit_level=habit)
     
+    # Shahar tanlash
+    await callback.message.answer(
+        "🌍 Namoz vaqtlarini to'g'ri hisoblashim uchun shahringizni tanlang:",
+        reply_markup=get_city_keyboard()
+    )
+    await state.set_state(Onboarding.city)
+
+@dp.callback_query(StateFilter(Onboarding.city), F.data.startswith("city_"))
+async def process_city(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    city = callback.data[5:]  # "city_Toshkent" → "Toshkent"
+    await state.update_data(city=city, timezone="Asia/Tashkent", prayer_notifications=True)
+    
     data = await state.get_data()
     user_id = callback.from_user.id
     
     save_user_data(user_id, data)
-    add_default_dhikr(user_id, habit)
+    add_default_dhikr(user_id, data.get('habit_level', 'beginner'))
+    add_default_duas(user_id)
     
     await state.clear()
     
@@ -190,9 +282,13 @@ async def process_habit(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.answer(
         f"Rahmat, hurmatli {name}! Ma'lumotlaringiz muvaffaqiyatli saqlandi. ✅\n\n"
+        f"📍 Shahringiz: <b>{city}</b>\n"
+        f"🕌 Namoz eslatmalari faollashtirildi\n"
+        f"🤲 Standart duolar qo'shildi\n\n"
         "Odatingizga mos ravishda kunlik zikrlarni belgilab qo'ydim.\n\n"
-        "Quyidagi tugma orqali elektron tasbehni ochishingiz mumkin 👇",
-        reply_markup=get_main_keyboard()
+        "Quyidagi tugma orqali boshlaymiz 👇",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
     )
 
 
@@ -316,7 +412,6 @@ async def process_custom_daily_btn(callback: types.CallbackQuery, state: FSMCont
     val = callback.data.split("_")[2]
     if val == "manual":
         await callback.message.edit_text("Iltimos, kunlik maqsadni raqamda yozing (masalan: 150):")
-        # state remains daily_target
     else:
         await state.update_data(daily_target=int(val))
         await callback.message.edit_text(
@@ -343,7 +438,6 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
     val = callback.data.split("_")[2]
     if val == "manual":
         await callback.message.edit_text("Iltimos, umumiy maqsadni raqamda yozing (masalan: 70000):")
-        # state remains global_target
     else:
         data = await state.get_data()
         title = data['title']
@@ -357,7 +451,6 @@ async def process_custom_global_btn(callback: types.CallbackQuery, state: FSMCon
             'global_target': global_tgt,
             'daily_count': 0,
             'global_count': 0,
-            'global_count': 0
         }).execute()
                 
         await state.clear()
@@ -377,17 +470,14 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
     global_tgt = int(message.text)
     
     supabase.table('dhikrs').insert({
-            'user_id': message.from_user.id,
-            'title': title,
-            'daily_target': daily_tgt,
-            'global_target': global_tgt,
-            'daily_count': 0,
-            'global_count': 0,
-            'global_count': 0
-        }).execute()
+        'user_id': message.from_user.id,
+        'title': title,
+        'daily_target': daily_tgt,
+        'global_target': global_tgt,
+        'daily_count': 0,
+        'global_count': 0,
+    }).execute()
             
-    await state.clear()
-    
     await state.clear()
     
     keyboard = get_start_action_keyboard()
@@ -456,7 +546,6 @@ async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMConte
         await state.clear()
         keyboard = get_start_action_keyboard()
         
-        # We need the title to show the completion message.
         response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
         title = response.data[0]['title']
         
@@ -475,19 +564,222 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
     global_tgt = int(message.text)
     
     supabase.table('dhikrs').update({
-            'daily_target': daily_tgt,
-            'global_target': global_tgt
-        }).eq('id', dhikr_id).execute()
+        'daily_target': daily_tgt,
+        'global_target': global_tgt
+    }).eq('id', dhikr_id).execute()
+    
     title_resp = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
     title = title_resp.data[0]['title']
-    pass
             
-    await state.clear()
-    
     await state.clear()
     
     keyboard = get_start_action_keyboard()
     await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
+
+
+# ==========================================
+# --- Duo'lar tizimi ---
+# ==========================================
+
+DUA_CATEGORY_NAMES = {
+    "morning": "🌅 Tonggi duolar",
+    "evening": "🌙 Kechki duolar",
+    "pre_prayer": "🕌 Namoz oldidan",
+    "bedtime": "🛏 Uxlashdan oldin",
+    "general": "📿 Umumiy duolar",
+    "custom": "✍️ Shaxsiy duolar",
+}
+
+@dp.callback_query(F.data == "view_duas")
+async def view_duas_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    duas = get_user_duas(user_id)
+    
+    if not duas:
+        # Default duolarni qo'shish
+        add_default_duas(user_id)
+        duas = get_user_duas(user_id)
+    
+    # Kategoriyalar bo'yicha guruhlash
+    categories = {}
+    for d in duas:
+        cat = d.get('category', 'custom')
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(d)
+    
+    text = "🤲 <b>Sizning Duo'laringiz</b>\n\n"
+    
+    total = len(duas)
+    active = sum(1 for d in duas if d.get('is_active', True))
+    text += f"Jami: {total} ta duo | Faol: {active} ta\n\n"
+    
+    for cat, cat_duas in categories.items():
+        cat_name = DUA_CATEGORY_NAMES.get(cat, cat)
+        active_count = sum(1 for d in cat_duas if d.get('is_active', True))
+        text += f"{cat_name}: {active_count}/{len(cat_duas)} ta\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌅 Tonggi duolar", callback_data="duas_cat_morning")],
+        [InlineKeyboardButton(text="🌙 Kechki duolar", callback_data="duas_cat_evening")],
+        [InlineKeyboardButton(text="🕌 Namoz oldidan", callback_data="duas_cat_pre_prayer")],
+        [InlineKeyboardButton(text="🛏 Uxlashdan oldin", callback_data="duas_cat_bedtime")],
+        [InlineKeyboardButton(text="📿 Umumiy duolar", callback_data="duas_cat_general")],
+        [InlineKeyboardButton(text="✍️ Shaxsiy duolar", callback_data="duas_cat_custom")],
+        [InlineKeyboardButton(text="➕ Yangi duo qo'shish", callback_data="add_custom_dua")],
+        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("duas_cat_"))
+async def duas_category_handler(callback: types.CallbackQuery):
+    category = callback.data[9:]  # "duas_cat_morning" → "morning"
+    user_id = callback.from_user.id
+    
+    duas = get_user_duas(user_id, category)
+    cat_name = DUA_CATEGORY_NAMES.get(category, category)
+    
+    if not duas:
+        text = f"{cat_name}\n\nBu kategoriyada hali duo yo'q."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Duo qo'shish", callback_data="add_custom_dua")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        return
+    
+    text = f"{cat_name}\n\n"
+    keyboard_buttons = []
+    
+    for idx, d in enumerate(duas[:10], 1):  # max 10 ta ko'rsatish
+        status = "✅" if d.get('is_active', True) else "❌"
+        dua_text = d['text'][:50] + "..." if len(d['text']) > 50 else d['text']
+        text += f"{idx}. {status} {dua_text}\n\n"
+        
+        row = []
+        if d.get('is_active', True):
+            row.append(InlineKeyboardButton(text=f"❌ {idx}-o'chirish", callback_data=f"dua_off_{d['id']}"))
+        else:
+            row.append(InlineKeyboardButton(text=f"✅ {idx}-yoqish", callback_data=f"dua_on_{d['id']}"))
+        
+        if category == "custom":
+            row.append(InlineKeyboardButton(text=f"🗑 O'chirish", callback_data=f"dua_del_{d['id']}"))
+        
+        keyboard_buttons.append(row)
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="view_duas")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("dua_on_"))
+async def dua_toggle_on_handler(callback: types.CallbackQuery):
+    dua_id = int(callback.data[7:])
+    toggle_dua(dua_id, True)
+    await callback.answer("✅ Duo faollashtirildi!")
+    await view_duas_handler(callback)
+
+@dp.callback_query(F.data.startswith("dua_off_"))
+async def dua_toggle_off_handler(callback: types.CallbackQuery):
+    dua_id = int(callback.data[8:])
+    toggle_dua(dua_id, False)
+    await callback.answer("❌ Duo o'chirildi!")
+    await view_duas_handler(callback)
+
+@dp.callback_query(F.data.startswith("dua_del_"))
+async def dua_delete_handler(callback: types.CallbackQuery):
+    dua_id = int(callback.data[8:])
+    delete_dua(dua_id)
+    await callback.answer("🗑 Duo o'chirib tashlandi!")
+    await view_duas_handler(callback)
+
+# --- Yangi duo qo'shish ---
+
+@dp.callback_query(F.data == "add_custom_dua")
+async def add_custom_dua_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "✍️ Yangi duo matnini yozing:\n\n"
+        "<i>Masalan: Allohumma inni as'aluka al-jannah</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(DuaState.text)
+
+@dp.message(StateFilter(DuaState.text))
+async def process_dua_text(message: types.Message, state: FSMContext):
+    await state.update_data(text=message.text)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌅 Tonggi", callback_data="dua_cat_morning")],
+        [InlineKeyboardButton(text="🌙 Kechki", callback_data="dua_cat_evening")],
+        [InlineKeyboardButton(text="🕌 Namoz oldidan", callback_data="dua_cat_pre_prayer")],
+        [InlineKeyboardButton(text="🛏 Uxlashdan oldin", callback_data="dua_cat_bedtime")],
+        [InlineKeyboardButton(text="📿 Umumiy", callback_data="dua_cat_general")],
+        [InlineKeyboardButton(text="✍️ Shaxsiy", callback_data="dua_cat_custom")],
+    ])
+    
+    await message.answer(
+        "Bu duo qaysi kategoriyaga tegishli?",
+        reply_markup=keyboard
+    )
+    await state.set_state(DuaState.category)
+
+@dp.callback_query(StateFilter(DuaState.category), F.data.startswith("dua_cat_"))
+async def process_dua_category(callback: types.CallbackQuery, state: FSMContext):
+    category = callback.data[8:]  # "dua_cat_morning" → "morning"
+    data = await state.get_data()
+    
+    add_custom_dua(callback.from_user.id, data['text'], category)
+    
+    await state.clear()
+    
+    cat_name = DUA_CATEGORY_NAMES.get(category, category)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤲 Duo'larga qaytish", callback_data="view_duas")],
+        [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        f"✅ Duo muvaffaqiyatli qo'shildi!\n\n"
+        f"📁 Kategoriya: {cat_name}",
+        reply_markup=keyboard
+    )
+
+
+# ==========================================
+# --- Namoz Vaqtlari ---
+# ==========================================
+
+@dp.message(Command("namoz"))
+async def namoz_times_handler(message: types.Message):
+    """Foydalanuvchiga bugungi namoz vaqtlarini ko'rsatish"""
+    user_data = get_user_full(message.from_user.id)
+    city = user_data.get('city', 'Toshkent') if user_data else 'Toshkent'
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    cached = get_cached_prayer_times(city, today)
+    
+    if cached:
+        times = {
+            "fajr": cached['fajr'],
+            "dhuhr": cached['dhuhr'],
+            "asr": cached['asr'],
+            "maghrib": cached['maghrib'],
+            "isha": cached['isha'],
+        }
+    else:
+        times = await fetch_prayer_times(city)
+        if times:
+            notify_times = {k: compute_notify_time(v) for k, v in times.items()}
+            save_prayer_cache(city, today, times, notify_times)
+    
+    text = format_prayer_times_message(times, city)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="main_menu")]
+    ])
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 # ==========================================
@@ -496,57 +788,161 @@ async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContex
 
 scheduler = AsyncIOScheduler()
 
-async def broadcast_reminder(reminder_type):
+async def refresh_prayer_cache():
+    """Barcha faol shaharlar uchun namoz vaqtlarini yangilash"""
+    cities = get_all_active_cities()
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    logger.info(f"Namoz vaqtlarini yangilash: {len(cities)} ta shahar")
+    
+    for city in cities:
+        cached = get_cached_prayer_times(city, today)
+        if not cached:
+            times = await fetch_prayer_times(city)
+            if times:
+                notify_times = {k: compute_notify_time(v) for k, v in times.items()}
+                save_prayer_cache(city, today, times, notify_times)
+                logger.info(f"✅ {city} uchun namoz vaqtlari cache'landi")
+            else:
+                logger.error(f"❌ {city} uchun namoz vaqtlarini olishda xatolik")
+            
+            await asyncio.sleep(1)  # API rate limit uchun
+
+
+async def check_prayer_notifications():
+    """Har daqiqada namoz eslatmalarini tekshirish"""
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    today = now.strftime("%Y-%m-%d")
+    
+    cities = get_all_active_cities()
+    
+    for city in cities:
+        cached = get_cached_prayer_times(city, today)
+        if not cached:
+            continue
+        
+        # Har bir namoz vaqtini tekshirish
+        for prayer_key in ["fajr", "dhuhr", "asr", "maghrib", "isha"]:
+            notify_key = f"{prayer_key}_notify"
+            notify_time = cached.get(notify_key)
+            
+            if notify_time == current_time:
+                # Bu namoz uchun eslatma vaqti keldi!
+                prayer_name = PRAYER_NAMES.get(prayer_key, prayer_key)
+                prayer_emoji = PRAYER_EMOJIS.get(prayer_key, "🕐")
+                prayer_time = cached.get(prayer_key, "--:--")
+                
+                # Tegishli duo olish
+                dua_category = get_prayer_dua_category(prayer_key)
+                dua = get_random_dua(dua_category)
+                
+                # Xabar matni
+                text = (
+                    f"{prayer_emoji} <b>{prayer_name} namoziga oz qoldi!</b>\n"
+                    f"🕐 Vaqti: <b>{prayer_time}</b>\n\n"
+                    f"🤲 <i>Duo:</i>\n"
+                    f"{format_dua_message(dua)}"
+                )
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+                    [InlineKeyboardButton(text="📿 Elektron Tasbeh", web_app=WebAppInfo(url=WEB_APP_URL))]
+                ])
+                
+                # Bu shahardagi barcha foydalanuvchilarga yuborish
+                users = get_users_by_city(city)
+                for user_id in users:
+                    try:
+                        await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+                    except Exception as e:
+                        logger.error(f"Namoz eslatmasi yuborishda xatolik ({user_id}): {e}")
+
+
+async def check_user_reminders():
+    """Har daqiqada shaxsiy eslatmalarni tekshirish"""
+    now = datetime.now()
+    current_time_str = now.strftime("%H:%M")
+    
+    try:
+        resp = supabase.table('user_reminders').select('user_id').eq('time', current_time_str).eq('is_active', True).execute()
+        if resp.data:
+            for r in resp.data:
+                user_id = r['user_id']
+                text = (
+                    "🔔 <b>Shaxsiy Eslatma!</b>\n\n"
+                    "Siz belgilagan zikr vaqti bo'ldi. Qalbingizga taskin berish uchun zikr qilishni unutmang! 🤲"
+                )
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+                    [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))]
+                ])
+                try:
+                    await bot.send_message(chat_id=user_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+                except Exception as e:
+                    logger.error(f"Failed to send custom reminder to {user_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error checking user reminders: {e}")
+
+
+async def send_morning_dua_broadcast():
+    """Ertalab random tonggi duo yuborish (7:00-8:00 orasida random)"""
     response = supabase.table('users').select('user_id').execute()
-    users = [(u['user_id'],) for u in response.data]
+    if not response.data:
+        return
+    
+    dua = get_random_dua("morning")
+    
+    text = (
+        "🌅 <b>Xayrli tong!</b>\n\n"
+        "Kunni Allohni eslab boshlang:\n\n"
+        f"{format_dua_message(dua)}\n\n"
+        "<i>Bugungi zikrlaringizni ham unutmang! 📿</i>"
+    )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
-        [InlineKeyboardButton(text="⏳ Birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
+        [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+        [InlineKeyboardButton(text="📿 Elektron Tasbeh", web_app=WebAppInfo(url=WEB_APP_URL))]
     ])
     
-    msg_text = "Hozir ruhiyatni tinchlantirish uchun 2-3 daqiqa vaqtingiz bormi? 🌿"
-    
-    morning_msgs = [
-        "Xayrli tong! Kunning barakasi zikrdadir. Boshlaymizmi? 🌅",
-        "Yangi kun, yangi umidlar! Bugungi kuningizni zikr bilan yoriting! ✨",
-        "Assalomu alaykum! Tonggi zikrlarni aytishga vaqt ajratamizmi? 🕊"
-    ]
-    day_msgs = [
-        "Tushlik vaqti bo'ldi. Ruhiyatni ham ozgina oziqlantiramizmi? 🍃",
-        "Ishlardan biroz chalg'ib, zikrga 2 daqiqa ajratamiz! ⏳",
-        "Kuningiz qanday o'tyapti? Zikr aytib, biroz xotirjamlik toping. 🌸"
-    ]
-    evening_msgs = [
-        "Kuningiz xayrli o'tdimi? Uxlashdan oldin qalbni xotirjam qilaylik. 🌙",
-        "Bugungi kun amallarini go'zal zikrlar bilan yakunlaymiz! 🌟",
-        "Kech tushdi, endi o'zimizga biroz vaqt ajratamizmi? 📿"
-    ]
-    
-    if reminder_type == "morning":
-        msg_text = random.choice(morning_msgs)
-    elif reminder_type in ["day", "afternoon"]:
-        msg_text = random.choice(day_msgs)
-    elif reminder_type == "evening":
-        msg_text = random.choice(evening_msgs)
-        
-    for u in users:
+    for u in response.data:
         try:
-            await bot.send_message(u[0], msg_text, reply_markup=keyboard)
+            await bot.send_message(u['user_id'], text, reply_markup=keyboard, parse_mode="HTML")
         except Exception:
             pass
+        await asyncio.sleep(0.1)
 
-async def send_specific_reminder(user_id, reminder_type):
+
+async def send_evening_dua_broadcast():
+    """Kechqurun random kechki duo yuborish"""
+    response = supabase.table('users').select('user_id').execute()
+    if not response.data:
+        return
+    
+    dua = get_random_dua("evening")
+    
+    text = (
+        "🌙 <b>Xayrli oqshom!</b>\n\n"
+        "Kuningizni go'zal duo bilan yakunlang:\n\n"
+        f"{format_dua_message(dua)}\n\n"
+        "<i>Uxlashdan oldin zikr qilishni unutmang! 📿</i>"
+    )
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
-        [InlineKeyboardButton(text="⏳ Yana birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
+        [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
+        [InlineKeyboardButton(text="📿 Elektron Tasbeh", web_app=WebAppInfo(url=WEB_APP_URL))]
     ])
-    try:
-        await bot.send_message(user_id, "Siz belgilagan vaqt bo'ldi! Zikr qilishni boshlaymizmi? 🌿", reply_markup=keyboard)
-    except Exception:
-        pass
+    
+    for u in response.data:
+        try:
+            await bot.send_message(u['user_id'], text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)
+
 
 async def send_daily_summary():
+    """Kunlik xulosa (22:30 da)"""
     today = datetime.now().strftime("%Y-%m-%d")
     response = supabase.table('users').select('user_id').execute()
     users = [(u['user_id'],) for u in response.data]
@@ -583,8 +979,11 @@ async def send_daily_summary():
             await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
         except Exception:
             pass
-            
-    pass
+
+
+# ==========================================
+# --- Action va Reminder handlers ---
+# ==========================================
 
 @dp.callback_query(F.data.startswith("start_action_"))
 async def start_action_handler(callback: types.CallbackQuery):
@@ -631,6 +1030,18 @@ async def start_action_handler(callback: types.CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
     await callback.message.edit_text(text, reply_markup=keyboard)
 
+
+async def send_specific_reminder(user_id, reminder_type):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, boshlaymiz", callback_data=f"remind_yes_{reminder_type}")],
+        [InlineKeyboardButton(text="⏳ Yana birozdan so'ng", callback_data=f"remind_later_{reminder_type}")]
+    ])
+    try:
+        await bot.send_message(user_id, "Siz belgilagan vaqt bo'ldi! Zikr qilishni boshlaymizmi? 🌿", reply_markup=keyboard)
+    except Exception:
+        pass
+
+
 @dp.callback_query(F.data.startswith("remind_yes_"))
 async def remind_yes_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -671,7 +1082,6 @@ async def render_log_dhikr(target, dhikr_id, user_id):
     global_tgt = dhikr['global_target']
     global_prog = dhikr['global_count']
     
-    # Bugungi sanani olish va jadvalga qo'shish/tekshirish
     today = datetime.now().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     
@@ -716,7 +1126,6 @@ async def select_log_handler(callback: types.CallbackQuery):
     await render_log_dhikr(callback, dhikr_id, callback.from_user.id)
 
 
-
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -730,139 +1139,6 @@ async def main_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text("Botga xush kelibsiz! Iltimos, /start buyrug'ini yuboring.")
 
-@dp.message(Command("stats"))
-async def stats_handler(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-        
-    # Umumiy foydalanuvchilar
-    total_users_resp = supabase.table('users').select('user_id', count='exact').execute()
-    total_users = total_users_resp.count
-    
-    # Bugun faol bo'lganlar (bugun zikr qilganlar)
-    today = datetime.now().strftime("%Y-%m-%d")
-    active_users_resp = supabase.table('daily_progress').select('user_id', count='exact').eq('date', today).execute()
-    active_users = active_users_resp.count
-    
-    # Foydalanuvchilar ro'yxati
-    users_resp = supabase.table('users').select('user_id, full_name, habit_level').execute()
-    users = users_resp.data
-    
-    text = f"📊 <b>Admin Statistika</b>\n\n"
-    text += f"👥 Umumiy foydalanuvchilar: <b>{total_users} ta</b>\n"
-    text += f"🔥 Bugungi faol foydalanuvchilar: <b>{active_users} ta</b>\n\n"
-    text += "📋 <b>Foydalanuvchilar ro'yxati:</b>\n"
-    
-    for idx, u in enumerate(users, 1):
-        habit = u.get('habit_level', '')
-        text += f"{idx}. {u.get('full_name', 'Ismsiz')} ({habit})\n"
-        
-    if len(text) > 4000:
-        text = text[:4000] + "\n...va boshqalar."
-        
-    await message.answer(text, parse_mode="HTML")
-
-# ==========================================
-# --- Sozlamalar (Settings) ---
-# ==========================================
-
-@dp.callback_query(F.data == "settings")
-async def settings_handler(callback: types.CallbackQuery):
-    response = supabase.table('users').select('full_name, age, habit_level').eq('user_id', callback.from_user.id).execute()
-    if response.data:
-        ud = response.data[0]
-        user_data = (ud['full_name'], ud['age'], ud['habit_level'])
-    else:
-        user_data = None
-    
-    if not user_data:
-        await callback.message.edit_text("Foydalanuvchi topilmadi. /start ni bosing.")
-        return
-        
-    name, age, habit = user_data
-    
-    habit_text = {
-        "beginner": "🌱 Yangi boshlayapman",
-        "medium": "🌿 Vaqt topganda qilaman",
-        "advanced": "🌳 Doimiy odatim bor"
-    }.get(habit, habit)
-    
-    age_text = {
-        "under20": "20 yoshgacha",
-        "21-30": "21-30 yosh",
-        "31-50": "31-50 yosh",
-        "over50": "50 yoshdan yuqori"
-    }.get(age, f"{age} yosh")
-    
-    text = (
-        "⚙️ <b>Sozlamalar</b>\n\n"
-        f"👤 Ism: <b>{name}</b>\n"
-        f"⏳ Yosh: <b>{age_text}</b>\n"
-        f"🔄 Odat: <b>{habit_text}</b>\n\n"
-        "<i>Quyidagilardan birini tanlang:</i>"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Ismni o'zgartirish", callback_data="settings_name")],
-        [InlineKeyboardButton(text="📊 Zikr odatini o'zgartirish", callback_data="settings_habit")],
-        [InlineKeyboardButton(text="🗑 Barcha ma'lumotlarni o'chirish", callback_data="settings_reset")],
-        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-
-@dp.callback_query(F.data == "settings_name")
-async def settings_name_handler(callback: types.CallbackQuery, state: FSMContext):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]])
-    await callback.message.edit_text("Yangi ismingizni kiriting:", reply_markup=keyboard)
-    await state.set_state(SettingsState.change_name)
-
-@dp.message(StateFilter(SettingsState.change_name))
-async def process_settings_name(message: types.Message, state: FSMContext):
-    new_name = message.text
-    supabase.table('users').update({'full_name': new_name}).eq('user_id', message.from_user.id).execute()
-    
-    await state.clear()
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Sozlamalarga qaytish", callback_data="settings")]])
-    await message.answer(f"Ismingiz <b>{new_name}</b> ga o'zgartirildi ✅", reply_markup=keyboard, parse_mode="HTML")
-
-@dp.callback_query(F.data == "settings_habit")
-async def settings_habit_handler(callback: types.CallbackQuery):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌱 Yangi boshlayapman", callback_data="set_habit_beginner")],
-        [InlineKeyboardButton(text="🌿 Vaqt topganda qilaman", callback_data="set_habit_medium")],
-        [InlineKeyboardButton(text="🌳 Doimiy odatim bor", callback_data="set_habit_advanced")],
-        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]
-    ])
-    await callback.message.edit_text("Kunlik zikr qilish odatingizni yangilang:", reply_markup=keyboard)
-
-@dp.callback_query(F.data.startswith("set_habit_"))
-async def process_settings_habit(callback: types.CallbackQuery):
-    new_habit = callback.data.split("_")[2]
-    supabase.table('users').update({'habit_level': new_habit}).eq('user_id', callback.from_user.id).execute()
-    
-    await callback.answer("Zikr odatingiz yangilandi ✅")
-    await settings_handler(callback)
-
-@dp.callback_query(F.data == "settings_reset")
-async def settings_reset_handler(callback: types.CallbackQuery):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚠️ HA, HAMMASINI O'CHIRISH", callback_data="settings_reset_confirm")],
-        [InlineKeyboardButton(text="⬅️ Yo'q, qaytish", callback_data="settings")]
-    ])
-    await callback.message.edit_text("⚠️ <b>DIQQAT!</b>\n\nSizning barcha saqlangan zikrlaringiz, kunlik statistika va umuman hamma natijalaringiz qaytarib bo'lmaydigan qilib o'chiriladi. Ishonchingiz komilmi?", reply_markup=keyboard, parse_mode="HTML")
-
-@dp.callback_query(F.data == "settings_reset_confirm")
-async def settings_reset_confirm_handler(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    supabase.table('daily_progress').delete().eq('user_id', user_id).execute()
-    supabase.table('dhikrs').delete().eq('user_id', user_id).execute()
-    supabase.table('users').delete().eq('user_id', user_id).execute()
-    pass
-    
-    await state.clear()
-    await callback.message.edit_text("🗑 Barcha ma'lumotlaringiz o'chirildi.\n\nYangi hayot boshlash uchun /start buyrug'ini yuboring.")
 
 @dp.callback_query(F.data.startswith("log_add_"))
 async def log_add_handler(callback: types.CallbackQuery):
@@ -931,33 +1207,231 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     await state.clear()
     await render_log_dhikr(message, dhikr_id, user_id)
     
-    # Option to celebrate here too, but doing it simply:
     await message.answer(f"✅ +{amount} ta zikr muvaffaqiyatli qo'shildi!")
 
-async def check_user_reminders():
-    # Get current time in HH:MM format
-    now = datetime.now()
-    current_time_str = now.strftime("%H:%M")
+
+# ==========================================
+# --- Admin Statistika ---
+# ==========================================
+
+@dp.message(Command("stats"))
+async def stats_handler(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+        
+    total_users_resp = supabase.table('users').select('user_id', count='exact').execute()
+    total_users = total_users_resp.count
     
-    try:
-        resp = supabase.table('user_reminders').select('user_id').eq('time', current_time_str).eq('is_active', True).execute()
-        if resp.data:
-            for r in resp.data:
-                user_id = r['user_id']
-                text = (
-                    "🔔 <b>Shaxsiy Eslatma!</b>\n\n"
-                    "Siz belgilagan zikr vaqti bo'ldi. Qalbingizga taskin berish uchun zikr qilishni unutmang! 🤲"
-                )
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🚀 Zikrni Boshlash", callback_data="start_action_now")],
-                    [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))]
-                ])
-                try:
-                    await bot.send_message(chat_id=user_id, text=text, reply_markup=keyboard, parse_mode="HTML")
-                except Exception as e:
-                    logging.error(f"Failed to send custom reminder to {user_id}: {e}")
-    except Exception as e:
-        logging.error(f"Error checking user reminders: {e}")
+    today = datetime.now().strftime("%Y-%m-%d")
+    active_users_resp = supabase.table('daily_progress').select('user_id', count='exact').eq('date', today).execute()
+    active_users = active_users_resp.count
+    
+    users_resp = supabase.table('users').select('user_id, full_name, habit_level, city').execute()
+    users = users_resp.data
+    
+    text = f"📊 <b>Admin Statistika</b>\n\n"
+    text += f"👥 Umumiy foydalanuvchilar: <b>{total_users} ta</b>\n"
+    text += f"🔥 Bugungi faol foydalanuvchilar: <b>{active_users} ta</b>\n\n"
+    text += "📋 <b>Foydalanuvchilar ro'yxati:</b>\n"
+    
+    for idx, u in enumerate(users, 1):
+        habit = u.get('habit_level', '')
+        city = u.get('city', 'Noma\'lum')
+        text += f"{idx}. {u.get('full_name', 'Ismsiz')} ({habit}) — {city}\n"
+        
+    if len(text) > 4000:
+        text = text[:4000] + "\n...va boshqalar."
+        
+    await message.answer(text, parse_mode="HTML")
+
+
+# ==========================================
+# --- Sozlamalar (Settings) ---
+# ==========================================
+
+@dp.callback_query(F.data == "settings")
+async def settings_handler(callback: types.CallbackQuery):
+    response = supabase.table('users').select('full_name, age, habit_level, city, prayer_notifications').eq('user_id', callback.from_user.id).execute()
+    if response.data:
+        ud = response.data[0]
+    else:
+        await callback.message.edit_text("Foydalanuvchi topilmadi. /start ni bosing.")
+        return
+    
+    name = ud.get('full_name', 'Noma\'lum')
+    age = ud.get('age', '')
+    habit = ud.get('habit_level', '')
+    city = ud.get('city', 'Toshkent')
+    prayer_on = ud.get('prayer_notifications', True)
+    
+    habit_text = {
+        "beginner": "🌱 Yangi boshlayapman",
+        "medium": "🌿 Vaqt topganda qilaman",
+        "advanced": "🌳 Doimiy odatim bor"
+    }.get(habit, habit)
+    
+    age_text = {
+        "under20": "20 yoshgacha",
+        "21-30": "21-30 yosh",
+        "31-50": "31-50 yosh",
+        "over50": "50 yoshdan yuqori"
+    }.get(age, f"{age} yosh")
+    
+    prayer_status = "✅ Yoqilgan" if prayer_on else "❌ O'chirilgan"
+    
+    text = (
+        "⚙️ <b>Sozlamalar</b>\n\n"
+        f"👤 Ism: <b>{name}</b>\n"
+        f"⏳ Yosh: <b>{age_text}</b>\n"
+        f"🔄 Odat: <b>{habit_text}</b>\n"
+        f"🌍 Shahar: <b>{city}</b>\n"
+        f"🕌 Namoz eslatmalari: <b>{prayer_status}</b>\n\n"
+        "<i>Quyidagilardan birini tanlang:</i>"
+    )
+    
+    prayer_btn_text = "🕌 Namoz eslatmalarini O'CHIRISH" if prayer_on else "🕌 Namoz eslatmalarini YOQISH"
+    prayer_action = "settings_prayer_off" if prayer_on else "settings_prayer_on"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Ismni o'zgartirish", callback_data="settings_name")],
+        [InlineKeyboardButton(text="🌍 Shaharni o'zgartirish", callback_data="settings_city")],
+        [InlineKeyboardButton(text=prayer_btn_text, callback_data=prayer_action)],
+        [InlineKeyboardButton(text="📊 Zikr odatini o'zgartirish", callback_data="settings_habit")],
+        [InlineKeyboardButton(text="🕌 Namoz vaqtlari", callback_data="settings_prayer_times")],
+        [InlineKeyboardButton(text="🗑 Barcha ma'lumotlarni o'chirish", callback_data="settings_reset")],
+        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data == "settings_name")
+async def settings_name_handler(callback: types.CallbackQuery, state: FSMContext):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]])
+    await callback.message.edit_text("Yangi ismingizni kiriting:", reply_markup=keyboard)
+    await state.set_state(SettingsState.change_name)
+
+@dp.message(StateFilter(SettingsState.change_name))
+async def process_settings_name(message: types.Message, state: FSMContext):
+    new_name = message.text
+    supabase.table('users').update({'full_name': new_name}).eq('user_id', message.from_user.id).execute()
+    
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Sozlamalarga qaytish", callback_data="settings")]])
+    await message.answer(f"Ismingiz <b>{new_name}</b> ga o'zgartirildi ✅", reply_markup=keyboard, parse_mode="HTML")
+
+# --- Shahar o'zgartirish ---
+
+@dp.callback_query(F.data == "settings_city")
+async def settings_city_handler(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "🌍 Yangi shahringizni tanlang:",
+        reply_markup=get_city_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("city_"), ~StateFilter(Onboarding.city))
+async def settings_city_select_handler(callback: types.CallbackQuery):
+    city = callback.data[5:]
+    supabase.table('users').update({'city': city}).eq('user_id', callback.from_user.id).execute()
+    
+    # Yangi shahar uchun namoz vaqtlarini cache'lash
+    today = datetime.now().strftime("%Y-%m-%d")
+    cached = get_cached_prayer_times(city, today)
+    if not cached:
+        times = await fetch_prayer_times(city)
+        if times:
+            notify_times = {k: compute_notify_time(v) for k, v in times.items()}
+            save_prayer_cache(city, today, times, notify_times)
+    
+    await callback.answer(f"✅ Shahringiz {city} ga o'zgartirildi!")
+    await settings_handler(callback)
+
+# --- Namoz eslatmalari toggle ---
+
+@dp.callback_query(F.data == "settings_prayer_on")
+async def settings_prayer_on_handler(callback: types.CallbackQuery):
+    supabase.table('users').update({'prayer_notifications': True}).eq('user_id', callback.from_user.id).execute()
+    await callback.answer("✅ Namoz eslatmalari yoqildi!")
+    await settings_handler(callback)
+
+@dp.callback_query(F.data == "settings_prayer_off")
+async def settings_prayer_off_handler(callback: types.CallbackQuery):
+    supabase.table('users').update({'prayer_notifications': False}).eq('user_id', callback.from_user.id).execute()
+    await callback.answer("❌ Namoz eslatmalari o'chirildi!")
+    await settings_handler(callback)
+
+# --- Namoz vaqtlarini ko'rish ---
+
+@dp.callback_query(F.data == "settings_prayer_times")
+async def settings_prayer_times_handler(callback: types.CallbackQuery):
+    user_data = get_user_full(callback.from_user.id)
+    city = user_data.get('city', 'Toshkent') if user_data else 'Toshkent'
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    cached = get_cached_prayer_times(city, today)
+    
+    if cached:
+        times = {k: cached[k] for k in ["fajr", "dhuhr", "asr", "maghrib", "isha"]}
+    else:
+        times = await fetch_prayer_times(city)
+        if times:
+            notify_times = {k: compute_notify_time(v) for k, v in times.items()}
+            save_prayer_cache(city, today, times, notify_times)
+    
+    text = format_prayer_times_message(times, city)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Sozlamalarga qaytish", callback_data="settings")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+# --- Zikr odati ---
+
+@dp.callback_query(F.data == "settings_habit")
+async def settings_habit_handler(callback: types.CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌱 Yangi boshlayapman", callback_data="set_habit_beginner")],
+        [InlineKeyboardButton(text="🌿 Vaqt topganda qilaman", callback_data="set_habit_medium")],
+        [InlineKeyboardButton(text="🌳 Doimiy odatim bor", callback_data="set_habit_advanced")],
+        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="settings")]
+    ])
+    await callback.message.edit_text("Kunlik zikr qilish odatingizni yangilang:", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("set_habit_"))
+async def process_settings_habit(callback: types.CallbackQuery):
+    new_habit = callback.data.split("_")[2]
+    supabase.table('users').update({'habit_level': new_habit}).eq('user_id', callback.from_user.id).execute()
+    
+    await callback.answer("Zikr odatingiz yangilandi ✅")
+    await settings_handler(callback)
+
+# --- Ma'lumotlarni o'chirish ---
+
+@dp.callback_query(F.data == "settings_reset")
+async def settings_reset_handler(callback: types.CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ HA, HAMMASINI O'CHIRISH", callback_data="settings_reset_confirm")],
+        [InlineKeyboardButton(text="⬅️ Yo'q, qaytish", callback_data="settings")]
+    ])
+    await callback.message.edit_text("⚠️ <b>DIQQAT!</b>\n\nSizning barcha saqlangan zikrlaringiz, duolar, kunlik statistika va umuman hamma natijalaringiz qaytarib bo'lmaydigan qilib o'chiriladi. Ishonchingiz komilmi?", reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data == "settings_reset_confirm")
+async def settings_reset_confirm_handler(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    supabase.table('daily_progress').delete().eq('user_id', user_id).execute()
+    supabase.table('dhikrs').delete().eq('user_id', user_id).execute()
+    supabase.table('duas').delete().eq('user_id', user_id).execute()
+    supabase.table('user_reminders').delete().eq('user_id', user_id).execute()
+    supabase.table('users').delete().eq('user_id', user_id).execute()
+    
+    await state.clear()
+    await callback.message.edit_text("🗑 Barcha ma'lumotlaringiz o'chirildi.\n\nYangi hayot boshlash uchun /start buyrug'ini yuboring.")
+
+
+# ==========================================
+# --- Main ---
+# ==========================================
 
 async def main() -> None:
     init_db()
@@ -965,16 +1439,39 @@ async def main() -> None:
     # Bot komandalarini o'rnatish
     await bot.set_my_commands([
         BotCommand(command="start", description="Botni qayta ishga tushirish"),
+        BotCommand(command="namoz", description="Bugungi namoz vaqtlari"),
         BotCommand(command="stats", description="Admin statistika (faqat adminlar uchun)")
     ])
     
-    # Har daqiqada shaxsiy eslatmalarni tekshirish
-    scheduler.add_job(check_user_reminders, 'cron', minute='*')
+    # --- Scheduler job'lari ---
     
-    # Kunlik xulosa (22:30 da) baribir hammaga ketaversin, bu umumiy report
-    scheduler.add_job(send_daily_summary, 'cron', hour=22, minute=30)
+    # 1. Namoz vaqtlarini har kuni yangilash (00:05 da)
+    scheduler.add_job(refresh_prayer_cache, 'cron', hour=0, minute=5, id='refresh_prayer')
+    
+    # 2. Bot start bo'lganda ham darhol cache'lash
+    scheduler.add_job(refresh_prayer_cache, 'date', run_date=datetime.now() + timedelta(seconds=5), id='refresh_prayer_startup')
+    
+    # 3. Har daqiqada namoz eslatmalarini tekshirish
+    scheduler.add_job(check_prayer_notifications, 'cron', minute='*', id='prayer_notifications')
+    
+    # 4. Har daqiqada shaxsiy eslatmalarni tekshirish
+    scheduler.add_job(check_user_reminders, 'cron', minute='*', id='user_reminders')
+    
+    # 5. Tonggi duo (random vaqtda 6:30-7:30 orasida)
+    morning_minute = random.randint(0, 59)
+    scheduler.add_job(send_morning_dua_broadcast, 'cron', hour=6, minute=morning_minute, id='morning_dua')
+    
+    # 6. Kechki duo (random vaqtda 20:00-20:59 orasida)
+    evening_minute = random.randint(0, 59)
+    scheduler.add_job(send_evening_dua_broadcast, 'cron', hour=20, minute=evening_minute, id='evening_dua')
+    
+    # 7. Kunlik xulosa (22:30 da)
+    scheduler.add_job(send_daily_summary, 'cron', hour=22, minute=30, id='daily_summary')
     
     scheduler.start()
+    logger.info("✅ Scheduler ishga tushdi")
+    logger.info(f"  📿 Tonggi duo: 06:{morning_minute:02d}")
+    logger.info(f"  📿 Kechki duo: 20:{evening_minute:02d}")
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
