@@ -70,16 +70,16 @@ async function initApp() {
     const { data: user } = await db.from('users').select('*').eq('user_id', userId).maybeSingle();
     if (user) {
         $('profile-name').textContent = user.full_name || 'Foydalanuvchi';
-        const habits = { beginner: '🌱 Yangi boshlayapman', medium: '🌿 Vaqt topganda', advanced: '🌳 Doimiy odat' };
+        const habits = { beginner: 'Yangi boshlayapman', medium: 'Vaqt topganda', advanced: 'Doimiy odat' };
         $('profile-habit').textContent = habits[user.habit_level] || '';
         $('chip-city-text').textContent = user.city || 'Toshkent';
         $('city-select').value = user.city || 'Toshkent';
         if (user.prayer_notifications) {
-            $('chip-prayer-text').textContent = 'Namoz ✓';
+            $('chip-prayer-text').textContent = 'Namoz faol';
         } else {
-            $('chip-prayer-text').textContent = 'Namoz ✗';
-            $('chip-prayer').style.background = 'rgba(239,68,68,0.1)';
-            $('chip-prayer').style.color = '#ef4444';
+            $('chip-prayer-text').textContent = 'Namoz o\'chiq';
+            $('chip-prayer').style.background = 'var(--danger-dim)';
+            $('chip-prayer').style.color = 'var(--danger)';
         }
     }
     await fetchDhikrs();
@@ -187,7 +187,7 @@ function renderDhikrList() {
                 <div class="flex gap-3 text-[10px] font-medium opacity-40 mb-1.5">
                     <span>${fmt(done)}/${fmt(d.daily_target)} bugun</span>
                     <span>${fmt(d.global_count || 0)} jami</span>
-                    ${isDone ? '<span class="text-amber-500 font-bold">✓ Bajarildi</span>' : ''}
+                    ${isDone ? '<span class="font-bold" style="color:var(--warning)"><i class="ph ph-check-circle text-[10px]"></i> Bajarildi</span>' : ''}
                 </div>
                 <div class="progress-track"><div class="progress-fill" style="width:${pct}%;${isDone ? 'background:#fbbf24' : ''}"></div></div>
             </div>
@@ -443,11 +443,11 @@ async function fetchStats() {
     if (streak > 0) {
         $('motivation-banner').classList.remove('hidden');
         const msgs = [
-            `🔥 ${streak} kunlik seriya! Davom eting!`,
-            `💪 ${streak} kun ketma-ket! Ajoyib!`,
-            `🌟 ${streak} kundan beri to'xtamagansiz!`
+            `${streak} kunlik seriya! Davom eting!`,
+            `${streak} kun ketma-ket! Ajoyib!`,
+            `${streak} kundan beri to'xtamagansiz!`
         ];
-        $('motivation-text').textContent = msgs[streak % msgs.length];
+        $('motivation-text').innerHTML = `<i class="ph ph-fire text-lg" style="color:var(--warning)"></i> ${msgs[streak % msgs.length]}`;
     } else { $('motivation-banner').classList.add('hidden'); }
 
     renderChart();
@@ -539,7 +539,7 @@ function renderHeatMap() {
         }
         el.title = `${c.date}: ${c.count}`;
         el.addEventListener('click', () => {
-            safeAlert(`📅 ${c.date}\n📿 ${fmt(c.count)} marta zikr`);
+            safeAlert(`${c.date}  —  ${fmt(c.count)} marta zikr`);
         });
         hm.appendChild(el);
     });
@@ -601,7 +601,7 @@ $('rem-time')?.addEventListener('change', async (e) => {
 });
 
 // ===== PRAYER TIMES =====
-const PRAYER_NAMES = { fajr: { n: 'Bomdod', e: '🌅' }, dhuhr: { n: 'Peshin', e: '☀️' }, asr: { n: 'Asr', e: '🌤' }, maghrib: { n: 'Shom', e: '🌆' }, isha: { n: 'Xufton', e: '🌙' } };
+const PRAYER_NAMES = { fajr: { n: 'Bomdod', ic: 'sun-horizon' }, dhuhr: { n: 'Peshin', ic: 'sun' }, asr: { n: 'Asr', ic: 'cloud-sun' }, maghrib: { n: 'Shom', ic: 'sun-dim' }, isha: { n: 'Xufton', ic: 'moon-stars' } };
 let prayerCountdownInterval = null;
 
 async function fetchPrayerTimes() {
@@ -611,7 +611,7 @@ async function fetchPrayerTimes() {
         const { data: user } = await db.from('users').select('city, prayer_notifications').eq('user_id', userId).single();
         const city = user?.city || 'Toshkent';
         $('prayer-toggle').checked = user?.prayer_notifications ?? true;
-        $('prayer-city').textContent = `📍 ${city}`;
+        $('prayer-city').innerHTML = `<i class="ph ph-map-pin text-[10px]"></i> ${city}`;
 
         const t = today();
         const { data: cached } = await db.from('prayer_cache').select('*').eq('city', city).eq('date', t).maybeSingle();
@@ -646,8 +646,8 @@ async function fetchPrayerTimes() {
             div.className = `p-3 flex items-center justify-between border-b border-[var(--border)] ${isNext ? 'next-prayer' : past ? 'opacity-35' : ''}`;
             let remaining = '';
             if (isNext) { const diff = pm - curMin; remaining = diff >= 60 ? `${Math.floor(diff/60)}s ${diff%60}m` : `${diff} min`; }
-            div.innerHTML = `<div class="flex items-center gap-2.5"><span class="text-lg">${info.e}</span><div><span class="font-medium text-sm">${info.n}</span>${isNext ? `<span class="text-[9px] block font-bold" style="color:var(--accent)">${remaining} qoldi</span>` : ''}</div></div>
-                <div class="flex items-center gap-1.5"><span class="font-bold text-sm tabular">${time}</span>${past ? '<i class="ph-fill ph-check-circle text-emerald-500 text-xs"></i>' : ''}${isNext ? '<i class="ph-fill ph-arrow-right text-xs" style="color:var(--accent)"></i>' : ''}</div>`;
+            div.innerHTML = `<div class="flex items-center gap-2.5"><div class="ic w-9 h-9" style="background:var(--accent-dim);color:var(--accent)"><i class="ph ph-${info.ic} text-lg"></i></div><div><span class="font-medium text-sm">${info.n}</span>${isNext ? `<span class="text-[9px] block font-bold" style="color:var(--accent)">${remaining} qoldi</span>` : ''}</div></div>
+                <div class="flex items-center gap-1.5"><span class="font-bold text-sm tabular">${time}</span>${past ? '<i class="ph-fill ph-check-circle text-xs" style="color:var(--accent)"></i>' : ''}${isNext ? '<i class="ph-fill ph-arrow-right text-xs" style="color:var(--accent)"></i>' : ''}</div>`;
             list.appendChild(div);
         }
 
@@ -676,9 +676,9 @@ async function fetchPrayerTimes() {
 $('prayer-toggle')?.addEventListener('change', async (e) => {
     haptic('light');
     const on = e.target.checked;
-    $('chip-prayer-text').textContent = on ? 'Namoz ✓' : 'Namoz ✗';
-    $('chip-prayer').style.background = on ? 'var(--accent-dim)' : 'rgba(239,68,68,0.1)';
-    $('chip-prayer').style.color = on ? 'var(--accent)' : '#ef4444';
+    $('chip-prayer-text').textContent = on ? 'Namoz faol' : 'Namoz o\'chiq';
+    $('chip-prayer').style.background = on ? 'var(--accent-dim)' : 'var(--danger-dim)';
+    $('chip-prayer').style.color = on ? 'var(--accent)' : 'var(--danger)';
     await db.from('users').update({ prayer_notifications: on }).eq('user_id', userId);
 });
 
@@ -727,8 +727,8 @@ function showDua(idx) {
     $('dua-text').textContent = dua.text || '';
     $('dua-counter').textContent = `${(idx % allDuas.length) + 1}/${allDuas.length}`;
 
-    const cats = { morning: '🌅 Tonggi', evening: '🌙 Kechki', pre_prayer: '🕌 Namoz', bedtime: '🛏 Uxlash', general: '📿 Umumiy', custom: '✍️ Shaxsiy' };
-    $('dua-cat-badge').textContent = cats[dua.category] || '📿 Duo';
+    const cats = { morning: 'Tonggi', evening: 'Kechki', pre_prayer: 'Namoz', bedtime: 'Uxlash', general: 'Umumiy', custom: 'Shaxsiy' };
+    $('dua-cat-badge').innerHTML = `<i class="ph ph-book-open text-[10px]"></i> ${cats[dua.category] || 'Duo'}`;
 
     $('dua-content').style.opacity = '0';
     $('dua-content').style.transform = 'translateY(4px)';
