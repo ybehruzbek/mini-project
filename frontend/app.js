@@ -16,7 +16,11 @@ const isoDate = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toI
 const today = () => isoDate(new Date());
 const fmt = (n) => (n || 0).toLocaleString('uz-UZ');
 const $ = (id) => document.getElementById(id);
-const haptic = (t) => { if (hapticsOn) tg.HapticFeedback.impactOccurred(t); };
+const haptic = (t) => { try { if (hapticsOn) tg.HapticFeedback.impactOccurred(t); } catch {} };
+const safeSelection = () => { try { tg.HapticFeedback.selectionChanged(); } catch {} };
+const safeNotify = (t) => { try { tg.HapticFeedback.notificationOccurred(t); } catch {} };
+const safeAlert = (msg) => { try { tg.showAlert(msg); } catch { alert(msg); } };
+const safeConfirm = (msg, cb) => { try { tg.showConfirm(msg, cb); } catch { cb(confirm(msg)); } };
 
 // ===== THEME =====
 function applyTheme() {
@@ -49,7 +53,7 @@ navBtns.forEach(btn => {
         const v = $(btn.dataset.view);
         v.classList.add('active');
         v.scrollTop = 0;
-        tg.HapticFeedback.selectionChanged();
+        safeSelection();
         if (btn.dataset.view === 'v-zikrlar') fetchDhikrs();
         if (btn.dataset.view === 'v-stats') fetchStats();
         if (btn.dataset.view === 'v-profile') { fetchReminders(); fetchPrayerTimes(); fetchDuas(); }
@@ -241,7 +245,7 @@ function updateUI() {
         $('counter-label').classList.remove('hidden');
         if (!goalNotified) {
             goalNotified = true;
-            tg.HapticFeedback.notificationOccurred('success');
+            safeNotify('success');
             $('tap-area').classList.add('goal-pulse');
             setTimeout(() => $('tap-area').classList.remove('goal-pulse'), 1000);
             const b = document.createElement('div'); b.className = 'burst-ring';
@@ -278,7 +282,7 @@ $('tap-area').addEventListener('click', () => {
 
 $('reset-btn').addEventListener('click', () => {
     if (currentCount === 0) return;
-    tg.showConfirm("Hisoblagichni qayta boshlaysizmi?", (ok) => {
+    safeConfirm("Hisoblagichni qayta boshlaysizmi?", (ok) => {
         if (ok) {
             currentCount = currentDhikr?._todayCount || 0;
             goalNotified = currentCount >= (currentDhikr?.daily_target || 0);
@@ -335,7 +339,7 @@ $('save-btn').addEventListener('click', async () => {
         const newTaps = currentCount - saved;
 
         if (newTaps <= 0) {
-            tg.HapticFeedback.notificationOccurred('warning');
+            safeNotify('warning');
             btn.innerHTML = '<i class="ph ph-info text-xl"></i> O\'zgarish yo\'q';
             setTimeout(() => { btn.innerHTML = orig; }, 2000); return;
         }
@@ -358,23 +362,23 @@ $('save-btn').addEventListener('click', async () => {
             $('global-text').textContent = `${fmt(newGlobal)} / ${fmt(currentDhikr.global_target)}`;
         }
 
-        tg.HapticFeedback.notificationOccurred('success');
+        safeNotify('success');
         btn.innerHTML = `<i class="ph ph-check text-xl"></i> +${fmt(newTaps)} saqlandi!`;
-        tg.sendData(JSON.stringify({ action: 'save_dhikr', title: currentDhikr.title, count: newDaily, target: currentDhikr.daily_target }));
+        try { tg.sendData(JSON.stringify({ action: 'save_dhikr', title: currentDhikr.title, count: newDaily, target: currentDhikr.daily_target })); } catch {}
     } catch (err) {
         console.error(err);
-        tg.HapticFeedback.notificationOccurred('error');
+        safeNotify('error');
         btn.innerHTML = '<i class="ph ph-warning text-xl"></i> Xatolik';
     }
     setTimeout(() => { btn.innerHTML = orig; }, 2500);
 });
 
 $('hard-reset').addEventListener('click', async () => {
-    tg.showConfirm("Barcha ma'lumotlarni o'chirasizmi? Ortga qaytarib bo'lmaydi!", async (ok) => {
+    safeConfirm("Barcha ma'lumotlarni o'chirasizmi? Ortga qaytarib bo'lmaydi!", async (ok) => {
         if (ok) {
             await db.from('dhikrs').delete().eq('user_id', userId);
             await db.from('daily_progress').delete().eq('user_id', userId);
-            tg.close();
+            try { tg.close(); } catch { window.close(); }
         }
     });
 });
@@ -535,7 +539,7 @@ function renderHeatMap() {
         }
         el.title = `${c.date}: ${c.count}`;
         el.addEventListener('click', () => {
-            tg.showAlert(`📅 ${c.date}\n📿 ${fmt(c.count)} marta zikr`);
+            safeAlert(`📅 ${c.date}\n📿 ${fmt(c.count)} marta zikr`);
         });
         hm.appendChild(el);
     });
@@ -582,7 +586,7 @@ async function fetchReminders() {
 
 window.toggleRem = async (id, on) => { haptic('light'); await db.from('user_reminders').update({ is_active: on }).eq('id', id); };
 window.deleteRem = (id) => {
-    tg.showConfirm("Eslatmani o'chirasizmi?", async (ok) => {
+    safeConfirm("Eslatmani o'chirasizmi?", async (ok) => {
         if (ok) { haptic('medium'); await db.from('user_reminders').delete().eq('id', id); fetchReminders(); }
     });
 };

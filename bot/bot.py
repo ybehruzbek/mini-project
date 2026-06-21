@@ -41,7 +41,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=10"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=11"
 
 # ==========================================
 # --- FSM States ---
