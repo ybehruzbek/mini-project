@@ -63,7 +63,7 @@ async function initApp() {
     $('profile-name').innerHTML = '<div class="skel h-5 w-28"></div>';
     $('profile-habit').innerHTML = '<div class="skel h-3 w-16 mt-1"></div>';
 
-    const { data: user } = await db.from('users').select('*').eq('user_id', userId).single();
+    const { data: user } = await db.from('users').select('*').eq('user_id', userId).maybeSingle();
     if (user) {
         $('profile-name').textContent = user.full_name || 'Foydalanuvchi';
         const habits = { beginner: '🌱 Yangi boshlayapman', medium: '🌿 Vaqt topganda', advanced: '🌳 Doimiy odat' };
@@ -185,7 +185,7 @@ function renderDhikrList() {
                     <span>${fmt(d.global_count || 0)} jami</span>
                     ${isDone ? '<span class="text-amber-500 font-bold">✓ Bajarildi</span>' : ''}
                 </div>
-                <div class="progress-track"><div class="progress-fill ${isDone ? '!bg-amber-400' : ''}" style="width:${pct}%"></div></div>
+                <div class="progress-track"><div class="progress-fill" style="width:${pct}%;${isDone ? 'background:#fbbf24' : ''}"></div></div>
             </div>
             <i class="ph ph-caret-right opacity-15 flex-shrink-0"></i>`;
         list.appendChild(el);
@@ -205,7 +205,7 @@ async function selectDhikr(d) {
     currentDhikr = d;
     goalNotified = false;
     try {
-        const { data: prog } = await db.from('daily_progress').select('count').eq('user_id', userId).eq('dhikr_id', d.id).eq('date', today()).single();
+        const { data: prog } = await db.from('daily_progress').select('count').eq('user_id', userId).eq('dhikr_id', d.id).eq('date', today()).maybeSingle();
         currentCount = prog ? (prog.count || 0) : 0;
     } catch { currentCount = 0; }
     currentDhikr._todayCount = currentCount;
@@ -329,7 +329,7 @@ $('save-btn').addEventListener('click', async () => {
 
     try {
         const t = today();
-        const { data: ep } = await db.from('daily_progress').select('id, count').eq('user_id', userId).eq('dhikr_id', currentDhikr.id).eq('date', t).single();
+        const { data: ep } = await db.from('daily_progress').select('id, count').eq('user_id', userId).eq('dhikr_id', currentDhikr.id).eq('date', t).maybeSingle();
         const prev = ep ? (ep.count || 0) : 0;
         const saved = currentDhikr._todayCount || 0;
         const newTaps = currentCount - saved;
@@ -454,7 +454,7 @@ async function fetchStats() {
         const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316'];
         pd.innerHTML = '';
         dhikrs.forEach((d, i) => {
-            const done = perDhikrToday[d.id] || 0; // This won't work because we don't have d.id from the query
+            const done = perDhikrToday[d.id] || 0;
             const pct = d.daily_target > 0 ? Math.min(100, Math.round(done / d.daily_target * 100)) : 0;
             const color = colors[i % colors.length];
             const row = document.createElement('div');
@@ -610,7 +610,7 @@ async function fetchPrayerTimes() {
         $('prayer-city').textContent = `📍 ${city}`;
 
         const t = today();
-        const { data: cached } = await db.from('prayer_cache').select('*').eq('city', city).eq('date', t).single();
+        const { data: cached } = await db.from('prayer_cache').select('*').eq('city', city).eq('date', t).maybeSingle();
         let times;
         if (cached) {
             times = { fajr: cached.fajr, dhuhr: cached.dhuhr, asr: cached.asr, maghrib: cached.maghrib, isha: cached.isha };
