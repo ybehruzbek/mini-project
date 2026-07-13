@@ -84,6 +84,7 @@ def add_default_duas(user_id):
                 "user_id": user_id,
                 "text": dua["text"],
                 "arabic": dua.get("arabic", ""),
+                "meaning": dua.get("meaning", ""),
                 "category": dua["category"],
                 "is_active": True
             }).execute()
@@ -188,6 +189,43 @@ def get_all_active_cities():
     if response.data:
         return list(set(u['city'] for u in response.data if u.get('city')))
     return []
+
+
+# --- Kechiktirilgan (bir martalik) eslatmalar ---
+
+def add_scheduled_reminder(user_id, run_at_iso, kind="shaxsiy"):
+    """Bir martalik eslatmani DB'ga saqlash (restartda yo'qolmaydi).
+
+    Args:
+        user_id: Foydalanuvchi ID
+        run_at_iso: Eslatma vaqti — timezone-aware ISO string (masalan '...+05:00')
+        kind: Eslatma turi
+    """
+    supabase.table("scheduled_reminders").insert({
+        "user_id": user_id,
+        "run_at": run_at_iso,
+        "kind": kind,
+        "sent": False,
+    }).execute()
+
+
+def get_due_reminders(now_iso):
+    """Yuborilishi kerak bo'lgan (vaqti kelgan, hali yuborilmagan) eslatmalar.
+
+    Args:
+        now_iso: Hozirgi vaqt — timezone-aware ISO string
+    """
+    response = (supabase.table("scheduled_reminders")
+                .select("id, user_id, kind")
+                .eq("sent", False)
+                .lte("run_at", now_iso)
+                .execute())
+    return response.data if response.data else []
+
+
+def mark_reminder_sent(reminder_id):
+    """Eslatmani 'yuborildi' deb belgilash (qayta yuborilmasligi uchun)"""
+    supabase.table("scheduled_reminders").update({"sent": True}).eq("id", reminder_id).execute()
 
 
 if __name__ == "__main__":

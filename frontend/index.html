@@ -6,10 +6,19 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Qalb Taskini</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Oldindan kompilyatsiya qilingan statik Tailwind (runtime kompilyatorsiz — tez va yengil) -->
+    <link rel="stylesheet" href="tailwind.css?v=14">
+    <!-- Ikonka fonti (renderni bloklamasin) -->
+    <link rel="preload" as="style" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css"
+        onload="this.onload=null;this.rel='stylesheet'">
+    <link rel="preload" as="style" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css"
+        onload="this.onload=null;this.rel='stylesheet'">
+    <noscript>
+        <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+        <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+    </noscript>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
     <style>
         :root {
@@ -63,7 +72,7 @@
             height: 100vh;
         }
 
-        .view { display: none; height: 100vh; padding-bottom: 110px; overflow-y: auto; flex-direction: column; }
+        .view { display: none; height: 100vh; padding-bottom: 110px; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; flex-direction: column; }
         .view.active { display: flex; animation: viewIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         .view > * { flex-shrink: 0; }
         @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -89,17 +98,17 @@
         /* Nav */
         .nav-wrap { position: fixed; bottom: 20px; left: 0; width: 100%; padding: 0 20px; z-index: 50; pointer-events: none; display: flex; justify-content: center; }
         .nav-pill {
-            background: rgba(255,255,255,0.92); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
+            background: rgba(255,255,255,0.96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 8px 32px -8px rgba(0,0,0,0.1), 0 0 0 0.5px rgba(0,0,0,0.04);
             border-radius: 40px; height: 68px; width: 100%; max-width: 380px;
             display: flex; justify-content: space-around; align-items: center; pointer-events: auto;
         }
         body.dark-theme .nav-pill {
-            background: rgba(22,32,50,0.88);
+            background: rgba(22,32,50,0.95);
             border-color: rgba(255,255,255,0.06);
             box-shadow: 0 8px 32px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
         }
-        .nav-btn { color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 60px; cursor: pointer; transition: all 0.2s; position: relative; background: none; border: none; }
+        .nav-btn { color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 60px; cursor: pointer; transition: color 0.2s; position: relative; background: none; border: none; }
         .nav-btn.active { color: var(--accent); }
         .nav-btn.active::after { content: ''; position: absolute; bottom: -4px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
@@ -136,7 +145,7 @@
         /* Segment control */
         .seg-ctrl { display: flex; background: var(--border); border-radius: 10px; padding: 3px; }
         body.dark-theme .seg-ctrl { background: rgba(255,255,255,0.05); }
-        .seg-btn { flex: 1; text-align: center; padding: 6px 0; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: all 0.2s; border: none; background: none; }
+        .seg-btn { flex: 1; text-align: center; padding: 6px 0; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: color 0.2s, background 0.2s, box-shadow 0.2s; border: none; background: none; }
         .seg-btn.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
         body.dark-theme .seg-btn.active { box-shadow: 0 1px 6px rgba(0,0,0,0.3); }
 
@@ -304,6 +313,24 @@
                 <span id="stat-best-day" class="text-sm font-bold tabular" style="color:var(--accent)">0</span>
             </div>
         </div>
+
+        <!-- Yutuqlar (nishonlar) -->
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold flex items-center gap-1.5"><i class="ph ph-medal" style="color:var(--warning)"></i> Yutuqlar</h3>
+            <span id="ach-count" class="text-[10px] font-bold opacity-40 tabular"></span>
+        </div>
+        <div id="achievements" class="flex gap-2.5 overflow-x-auto pb-2 mb-5 -mx-1 px-1" style="scrollbar-width:none"></div>
+
+        <!-- Ulashish kartasi -->
+        <button id="share-stats-btn" class="card card-press w-full p-3.5 mb-5 flex items-center gap-3 text-left">
+            <div class="ic w-10 h-10 flex-shrink-0" style="background:var(--accent-dim);color:var(--accent)"><i class="ph ph-share-network text-xl"></i></div>
+            <div class="flex-1">
+                <p class="font-bold text-sm">Natijani ulashish</p>
+                <p class="text-[11px] opacity-40">Do'stlaringizni zikrga chorlang</p>
+            </div>
+            <i class="ph ph-caret-right opacity-20"></i>
+        </button>
+        <canvas id="share-canvas" width="1080" height="1350" class="hidden"></canvas>
 
         <!-- Chart toggle -->
         <div class="flex items-center justify-between mb-3">
@@ -499,6 +526,7 @@
         </nav>
     </div>
 
-    <script src="app.js"></script>
+    <!-- defer: supabase (head, defer) yuklab bo'lgach, hujjat tartibida ishga tushadi -->
+    <script src="app.js?v=14" defer></script>
 </body>
 </html>

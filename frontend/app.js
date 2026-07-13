@@ -8,6 +8,8 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let userId = tg.initDataUnsafe?.user?.id || 1277687464;
 let currentDhikr = null;
 let currentCount = 0;
+let currentUser = null;
+let statsSnapshot = { name: 'Foydalanuvchi', today: 0, streak: 0, global: 0, bestDay: 0 };
 let hapticsOn = localStorage.getItem('haptics') !== 'false';
 let themeMode = localStorage.getItem('theme') || 'auto';
 
@@ -68,7 +70,9 @@ async function initApp() {
     $('profile-habit').innerHTML = '<div class="skel h-3 w-16 mt-1"></div>';
 
     const { data: user } = await db.from('users').select('*').eq('user_id', userId).maybeSingle();
+    currentUser = user;
     if (user) {
+        statsSnapshot.name = user.full_name || 'Foydalanuvchi';
         $('profile-name').textContent = user.full_name || 'Foydalanuvchi';
         const habits = { beginner: 'Yangi boshlayapman', medium: 'Vaqt topganda', advanced: 'Doimiy odat' };
         $('profile-habit').textContent = habits[user.habit_level] || '';
@@ -374,10 +378,13 @@ $('save-btn').addEventListener('click', async () => {
 });
 
 $('hard-reset').addEventListener('click', async () => {
-    safeConfirm("Barcha ma'lumotlarni o'chirasizmi? Ortga qaytarib bo'lmaydi!", async (ok) => {
+    safeConfirm("Barcha ma'lumotlaringiz — zikrlar, duolar, statistika va sozlamalar butunlay o'chiriladi. Ortga qaytarib bo'lmaydi!", async (ok) => {
         if (ok) {
-            await db.from('dhikrs').delete().eq('user_id', userId);
             await db.from('daily_progress').delete().eq('user_id', userId);
+            await db.from('dhikrs').delete().eq('user_id', userId);
+            await db.from('duas').delete().eq('user_id', userId);
+            await db.from('user_reminders').delete().eq('user_id', userId);
+            await db.from('users').delete().eq('user_id', userId);
             try { tg.close(); } catch { window.close(); }
         }
     });
@@ -438,6 +445,10 @@ async function fetchStats() {
     let bestDay = 0;
     Object.values(allDailyTotals).forEach(v => { if (v > bestDay) bestDay = v; });
     $('stat-best-day').textContent = fmt(bestDay);
+
+    // Ulashish uchun snapshot + yutuqlar
+    statsSnapshot = { name: statsSnapshot.name, today: totalDaily, streak, global: totalGlobal, bestDay };
+    renderAchievements(statsSnapshot);
 
     // Motivation
     if (streak > 0) {
@@ -741,6 +752,176 @@ function showDua(idx) {
 
 $('next-dua')?.addEventListener('click', () => { if (allDuas.length > 1) { haptic('light'); duaIdx = (duaIdx + 1) % allDuas.length; showDua(duaIdx); } });
 $('prev-dua')?.addEventListener('click', () => { if (allDuas.length > 1) { haptic('light'); duaIdx = (duaIdx - 1 + allDuas.length) % allDuas.length; showDua(duaIdx); } });
+
+// ===== ACHIEVEMENTS (Yutuqlar) =====
+const ACHIEVEMENTS = [
+    { id: 'first', icon: 'ph-seal-check', label: 'Boshlanish', color: '#10b981', test: s => s.global > 0 || s.streak > 0 },
+    { id: 's3', icon: 'ph-fire', label: '3 kun seriya', color: '#f59e0b', test: s => s.streak >= 3 },
+    { id: 's7', icon: 'ph-fire', label: '7 kun seriya', color: '#f59e0b', test: s => s.streak >= 7 },
+    { id: 's30', icon: 'ph-flame', label: '30 kun seriya', color: '#ef4444', test: s => s.streak >= 30 },
+    { id: 'g1k', icon: 'ph-medal', label: '1,000', color: '#6366f1', test: s => s.global >= 1000 },
+    { id: 'g10k', icon: 'ph-medal', label: '10,000', color: '#6366f1', test: s => s.global >= 10000 },
+    { id: 'g40k', icon: 'ph-crown-simple', label: '40,000', color: '#8b5cf6', test: s => s.global >= 40000 },
+    { id: 'g100k', icon: 'ph-crown', label: '100k klub', color: '#8b5cf6', test: s => s.global >= 100000 },
+    { id: 'best500', icon: 'ph-lightning', label: '500/kun', color: '#14b8a6', test: s => s.bestDay >= 500 },
+];
+
+function renderAchievements(s) {
+    const wrap = $('achievements');
+    if (!wrap) return;
+    let unlocked = 0;
+    wrap.innerHTML = '';
+    ACHIEVEMENTS.forEach(a => {
+        const ok = a.test(s);
+        if (ok) unlocked++;
+        const el = document.createElement('div');
+        el.className = 'flex flex-col items-center gap-1.5 flex-shrink-0';
+        el.style.width = '72px';
+        el.innerHTML = `
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center border" style="${ok
+                ? `background:${a.color}1a;border-color:${a.color}55;color:${a.color}`
+                : 'background:var(--card-hover);border-color:var(--border);color:var(--muted);opacity:0.45'}">
+                <i class="ph ${ok ? 'ph-fill ' + a.icon : 'ph-lock-simple'} text-2xl"></i>
+            </div>
+            <span class="text-[9px] font-bold text-center leading-tight ${ok ? '' : 'opacity-40'}">${a.label}</span>`;
+        wrap.appendChild(el);
+    });
+    const cnt = $('ach-count');
+    if (cnt) cnt.textContent = `${unlocked}/${ACHIEVEMENTS.length}`;
+}
+
+// ===== SHARE CARD =====
+function drawRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+function buildShareCanvas() {
+    const c = $('share-canvas');
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const s = statsSnapshot;
+
+    // Fon gradienti
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#0b1a14');
+    g.addColorStop(1, '#0c1222');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // Yorug'lik dog'i
+    const glow = ctx.createRadialGradient(W / 2, 340, 40, W / 2, 340, 420);
+    glow.addColorStop(0, 'rgba(16,185,129,0.28)');
+    glow.addColorStop(1, 'rgba(16,185,129,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, 760);
+
+    ctx.textAlign = 'center';
+
+    // Sarlavha
+    ctx.fillStyle = '#34d399';
+    ctx.font = "bold 62px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText('📿 Qalb Taskini', W / 2, 170);
+
+    // Ism
+    ctx.fillStyle = '#e8ecf1';
+    ctx.font = "600 52px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(s.name, W / 2, 300);
+
+    // Katta seriya raqami doira ichida
+    ctx.strokeStyle = 'rgba(52,211,153,0.35)';
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.arc(W / 2, 520, 150, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = "bold 130px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(String(s.streak), W / 2, 560);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = "600 34px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText('kunlik seriya 🔥', W / 2, 730);
+
+    // Statistika qutilari
+    const stats = [
+        { label: 'BUGUN', value: fmt(s.today) },
+        { label: 'UMUMIY', value: fmt(s.global) },
+        { label: 'REKORD', value: fmt(s.bestDay) },
+    ];
+    const bw = 300, bh = 200, gap = 30;
+    const totalW = bw * 3 + gap * 2;
+    let bx = (W - totalW) / 2;
+    const by = 820;
+    stats.forEach(st => {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        drawRoundRect(ctx, bx, by, bw, bh, 28);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 2;
+        drawRoundRect(ctx, bx, by, bw, bh, 28);
+        ctx.stroke();
+        ctx.fillStyle = '#34d399';
+        ctx.font = "bold 58px -apple-system, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(st.value, bx + bw / 2, by + 100);
+        ctx.fillStyle = '#5a6d84';
+        ctx.font = "bold 26px -apple-system, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(st.label, bx + bw / 2, by + 150);
+        bx += bw + gap;
+    });
+
+    // Pastki iqtibos
+    ctx.fillStyle = '#cbd5e1';
+    ctx.font = "italic 34px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText('«Meni eslanglar, Men ham sizni eslayman»', W / 2, 1160);
+    ctx.fillStyle = '#5a6d84';
+    ctx.font = "600 28px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText('— Al-Baqara, 152', W / 2, 1210);
+
+    // Sana
+    const d = new Date();
+    const ds = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    ctx.fillStyle = '#475569';
+    ctx.font = "600 26px -apple-system, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(ds, W / 2, 1290);
+
+    return c;
+}
+
+$('share-stats-btn')?.addEventListener('click', () => {
+    haptic('medium');
+    const btn = $('share-stats-btn');
+    try {
+        const canvas = buildShareCanvas();
+        canvas.toBlob(async (blob) => {
+            if (!blob) { safeAlert('Rasm yaratishda xatolik.'); return; }
+            const file = new File([blob], 'qalb-taskini.png', { type: 'image/png' });
+            // Avval tizim ulashish oynasi (mobil)
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({ files: [file], title: 'Qalb Taskini', text: 'Mening zikr natijalarim 📿' });
+                    return;
+                } catch (e) { /* bekor qilindi yoki qo'llab-quvvatlanmaydi → yuklab olishga o'tamiz */ }
+            }
+            // Zaxira: yuklab olish
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'qalb-taskini.png';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            safeNotify('success');
+        }, 'image/png');
+    } catch (e) {
+        console.error(e);
+        safeAlert('Ulashishda xatolik yuz berdi.');
+    }
+});
 
 // START
 initApp();

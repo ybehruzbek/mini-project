@@ -8,14 +8,16 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import math
 import random
 from dotenv import load_dotenv
 from database import (
     init_db, save_user_data, add_default_dhikr, get_user, get_user_full,
-    supabase, add_default_duas, get_user_duas, get_active_duas,
+    supabase, add_default_duas, get_user_duas,
     toggle_dua, delete_dua, add_custom_dua, update_dua, get_dua_by_id,
-    get_cached_prayer_times, save_prayer_cache, get_users_by_city, get_all_active_cities
+    get_cached_prayer_times, save_prayer_cache, get_users_by_city, get_all_active_cities,
+    add_scheduled_reminder, get_due_reminders, mark_reminder_sent
 )
 from prayer import (
     UZBEK_CITIES, PRAYER_NAMES, PRAYER_EMOJIS,
@@ -25,9 +27,81 @@ from duas_data import (
     get_random_dua, get_prayer_dua_category, format_dua_message,
     MORNING_DUAS, EVENING_DUAS
 )
-from dhikr_guidelines import POST_DHIKR_GUIDANCE, POST_DHIKR_GUIDANCE_SHORT, DHIKR_RULES, get_dua_rules
+from dhikr_guidelines import POST_DHIKR_GUIDANCE, DHIKR_RULES, get_dua_rules
 
 ADMIN_ID = 1277687464
+
+# Butun bot Toshkent vaqtida ishlaydi (GitHub Actions serveri UTC bo'lsa ham)
+TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
+
+
+def now_tashkent() -> datetime:
+    """Toshkent mahalliy vaqtini (naive) qaytaradi.
+
+    Butun kod strftime va .replace() bilan ishlagani uchun naive datetime
+    qaytaramiz, lekin qiymati har doim Toshkent vaqti bo'ladi.
+    """
+    return datetime.now(TASHKENT_TZ).replace(tzinfo=None)
+
+
+def now_tashkent_aware() -> datetime:
+    """Toshkent vaqtini timezone-aware ko'rinishda qaytaradi (DB uchun)."""
+    return datetime.now(TASHKENT_TZ)
+
+
+def progress_bar(current: int, target: int, length: int = 10) -> str:
+    """Vizual progress bar qaytaradi: ▓▓▓▓▓░░░░░"""
+    if target <= 0:
+        return "░" * length
+    ratio = min(1.0, current / target)
+    filled = round(ratio * length)
+    return "▓" * filled + "░" * (length - filled)
+
+
+def compute_streak(user_id) -> int:
+    """Ketma-ket zikr qilingan kunlar sonini hisoblaydi (bugun yoki kechadan boshlab)."""
+    try:
+        resp = (supabase.table('daily_progress')
+                .select('date, count')
+                .eq('user_id', user_id)
+                .order('date', desc=True)
+                .limit(400)
+                .execute())
+    except Exception as e:
+        logger.error(f"Streak hisoblashda xatolik: {e}")
+        return 0
+
+    # Har bir kun uchun jami sanoq (count>0 bo'lgan kunlar)
+    day_totals = {}
+    for p in (resp.data or []):
+        if p.get('count', 0) > 0:
+            day_totals[p['date']] = day_totals.get(p['date'], 0) + p['count']
+
+    if not day_totals:
+        return 0
+
+    from datetime import date as _date
+    cur = now_tashkent().date()
+    # Agar bugun hali boshlanmagan bo'lsa, kechadan sanaymiz
+    if cur.isoformat() not in day_totals:
+        cur = cur - timedelta(days=1)
+
+    streak = 0
+    while cur.isoformat() in day_totals:
+        streak += 1
+        cur = cur - timedelta(days=1)
+    return streak
+
+
+def community_today_total() -> int:
+    """Bugun butun jamiyat (barcha foydalanuvchilar) qilgan jami zikr soni."""
+    try:
+        today = now_tashkent().strftime("%Y-%m-%d")
+        resp = supabase.table('daily_progress').select('count').eq('date', today).execute()
+        return sum(p.get('count', 0) for p in (resp.data or []))
+    except Exception as e:
+        logger.error(f"Ummat hisobini olishda xatolik: {e}")
+        return 0
 
 # Muhit o'zgaruvchilarini yuklash
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -42,7 +116,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Web App URL
-WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=12"
+WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=14"
 
 # ==========================================
 # --- FSM States ---
@@ -51,17 +125,11 @@ WEB_APP_URL = "https://ybehruzbek.github.io/mini-project/frontend/?v=12"
 class Onboarding(StatesGroup):
     name = State()
     age = State()
-    gender = State()
     habit = State()
     city = State()
 
 class CustomDhikr(StatesGroup):
     title = State()
-    daily_target = State()
-    global_target = State()
-
-class EditDhikr(StatesGroup):
-    dhikr_id = State()
     daily_target = State()
     global_target = State()
 
@@ -237,20 +305,7 @@ async def process_age(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
     age_group = callback.data.split("_")[1]
     await state.update_data(age=age_group)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👨 Erkak", callback_data="gender_male"),
-         InlineKeyboardButton(text="👩 Ayol", callback_data="gender_female")]
-    ])
-    await callback.message.answer("Jinsingizni belgilang:", reply_markup=keyboard)
-    await state.set_state(Onboarding.gender)
 
-@dp.callback_query(StateFilter(Onboarding.gender), F.data.startswith("gender_"))
-async def process_gender(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    gender = callback.data.split("_")[1]
-    await state.update_data(gender=gender)
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌱 Yangi boshlayapman", callback_data="habit_beginner")],
         [InlineKeyboardButton(text="🌿 Vaqt topganda qilaman", callback_data="habit_medium")],
@@ -326,7 +381,7 @@ def get_completion_msg(title, daily_tgt, global_tgt):
     )
 
 def get_start_action_keyboard():
-    hour = datetime.now().hour
+    hour = now_tashkent().hour
     buttons = [[InlineKeyboardButton(text="Hozirroq boshlayman 🚀", callback_data="start_action_now")]]
     
     if 8 <= hour < 18:
@@ -344,28 +399,54 @@ def get_start_action_keyboard():
 @dp.callback_query(F.data == "view_stats")
 async def view_stats_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    
-    today = datetime.now().strftime("%Y-%m-%d")
+
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('date', today).execute()
     today_total = sum(p['count'] for p in prog_resp.data) if prog_resp.data else 0
-    
-    dhikr_resp = supabase.table('dhikrs').select('title, global_count').eq('user_id', user_id).execute()
+
+    dhikr_resp = supabase.table('dhikrs').select('title, daily_target, global_count').eq('user_id', user_id).execute()
     total_global = sum(d['global_count'] for d in dhikr_resp.data) if dhikr_resp.data else 0
-    
+    daily_target_total = sum(d.get('daily_target', 0) for d in dhikr_resp.data) if dhikr_resp.data else 0
+
     favorite = "Yo'q"
     if dhikr_resp.data:
         sorted_dhikrs = sorted(dhikr_resp.data, key=lambda x: x['global_count'], reverse=True)
         if sorted_dhikrs and sorted_dhikrs[0]['global_count'] > 0:
-            favorite = f"{sorted_dhikrs[0]['title']} ({sorted_dhikrs[0]['global_count']} marta)"
-            
+            favorite = f"{sorted_dhikrs[0]['title']} ({sorted_dhikrs[0]['global_count']:,} marta)"
+
+    streak = compute_streak(user_id)
+    ummat = community_today_total()
+
+    # Ketma-ketlikka mos motivatsiya
+    if streak >= 30:
+        streak_line = f"🔥 <b>Ketma-ketlik:</b> {streak} kun — Mashaa'Alloh, ajoyib odat!"
+    elif streak >= 7:
+        streak_line = f"🔥 <b>Ketma-ketlik:</b> {streak} kun — zo'r ketyapsiz!"
+    elif streak > 0:
+        streak_line = f"🔥 <b>Ketma-ketlik:</b> {streak} kun"
+    else:
+        streak_line = "🔥 <b>Ketma-ketlik:</b> bugun boshlang!"
+
+    # Bugungi maqsadga nisbatan vizual progress
+    if daily_target_total > 0:
+        bar = progress_bar(today_total, daily_target_total)
+        pct = min(100, round(today_total / daily_target_total * 100))
+        today_line = f"🗓 <b>Bugun:</b> {today_total:,} / {daily_target_total:,}\n<code>{bar}</code> {pct}%"
+    else:
+        today_line = f"🗓 <b>Bugungi natija:</b> {today_total:,} marta"
+
     text = (
-        "📊 <b>Sizning Statistikangiz</b>\n\n"
-        f"🗓 <b>Bugungi natija:</b> {today_total} marta\n"
-        f"🌐 <b>Umumiy o'qilgan:</b> {total_global} marta\n"
+        "📊 <b>Sizning Statistikangiz</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"{today_line}\n\n"
+        f"🌐 <b>Umumiy o'qilgan:</b> {total_global:,} marta\n"
+        f"{streak_line}\n"
         f"🏆 <b>Sevimli zikringiz:</b> {favorite}\n\n"
-        "<i>Batafsil grafikalar, ketma-ketlik (streak) va qiziqarli ma'lumotlarni ko'rish uchun <b>Web Ilovaga</b> kiring!</i>"
+        f"🕌 <b>Ummat bugun:</b> {ummat:,} marta zikr aytdi\n"
+        "<i>Siz ham shu savob daryosining bir qismisiz! 🌿</i>\n\n"
+        "<i>Batafsil grafik, heat-map va boshqa ma'lumotlar uchun <b>Web Ilovaga</b> kiring.</i>"
     )
-    
+
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📿 Elektron Tasbeh (Web)", web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="main_menu")]
@@ -388,7 +469,7 @@ async def view_dhikrs_handler(callback: types.CallbackQuery):
         return
     
     # Bugungi progress olish
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', user_id).eq('date', today).execute()
     today_progress = {}
     if prog_resp.data:
@@ -428,9 +509,11 @@ def build_dhikr_card(dhikrs, index, today_progress=None):
     text += f"📊 <b>Maqsadlar:</b>\n"
     daily_emoji = "✅" if daily_done else "🔄"
     text += f"  {daily_emoji} Kunlik: <b>{today_count:,}</b> / {daily_tgt:,}\n"
-    
+    text += f"  <code>{progress_bar(today_count, daily_tgt)}</code>\n\n"
+
     global_pct = round(global_count / global_tgt * 100, 1) if global_tgt > 0 else 0
     text += f"  🌍 Umumiy: <b>{global_count:,}</b> / {global_tgt:,} ({global_pct}%)\n"
+    text += f"  <code>{progress_bar(global_count, global_tgt)}</code>\n"
     
     # Keyboard
     buttons = []
@@ -480,7 +563,7 @@ async def zcard_handler(callback: types.CallbackQuery):
     response = supabase.table('dhikrs').select('*').eq('user_id', user_id).order('id').execute()
     dhikrs = response.data or []
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', user_id).eq('date', today).execute()
     today_progress = {}
     if prog_resp.data:
@@ -508,7 +591,7 @@ async def zdone_handler(callback: types.CallbackQuery):
         return
     
     dhikr = d.data[0]
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     today_count = prog.data[0]['count'] if prog.data else 0
     
@@ -594,7 +677,7 @@ async def zdelyes_handler(callback: types.CallbackQuery):
         return
     
     new_idx = min(int(parts[1]), len(dhikrs) - 1)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('dhikr_id, count').eq('user_id', callback.from_user.id).eq('date', today).execute()
     today_progress = {}
     if prog_resp.data:
@@ -906,99 +989,6 @@ async def process_custom_dhikr_global_target_msg(message: types.Message, state: 
     await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
 
 
-# --- 2. Zikrni Tahrirlash FSM ---
-
-@dp.callback_query(F.data.startswith("edit_dhikr_"))
-async def edit_dhikr_handler(callback: types.CallbackQuery, state: FSMContext):
-    dhikr_id = int(callback.data.split("_")[2])
-    
-    response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
-    title = response.data[0]['title']
-    
-    await callback.message.edit_text(
-        f"📿 {title}\n\nYangi KUNLIK maqsadni tanlang:",
-        reply_markup=get_daily_target_keyboard("edit")
-    )
-    await state.set_state(EditDhikr.daily_target)
-    await state.update_data(dhikr_id=dhikr_id)
-
-
-@dp.callback_query(StateFilter(EditDhikr.daily_target), F.data.startswith("edit_daily_"))
-async def process_edit_daily_btn(callback: types.CallbackQuery, state: FSMContext):
-    val = callback.data.split("_")[2]
-    if val == "manual":
-        await callback.message.edit_text("Iltimos, yangi kunlik maqsadni raqamda yozing:")
-    else:
-        await state.update_data(daily_target=int(val))
-        await callback.message.edit_text(
-            f"Kunlik maqsad: {val} ta ✅\n\nEndi UMUMIY maqsadni tanlang:",
-            reply_markup=get_global_target_keyboard("edit")
-        )
-        await state.set_state(EditDhikr.global_target)
-
-@dp.message(StateFilter(EditDhikr.daily_target))
-async def process_edit_dhikr_daily_msg(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Iltimos, faqat raqam kiriting.")
-        return
-        
-    await state.update_data(daily_target=int(message.text))
-    await message.answer(
-        f"Kunlik maqsad: {message.text} ta ✅\n\nEndi UMUMIY maqsadni tanlang:",
-        reply_markup=get_global_target_keyboard("edit")
-    )
-    await state.set_state(EditDhikr.global_target)
-
-@dp.callback_query(StateFilter(EditDhikr.global_target), F.data.startswith("edit_global_"))
-async def process_edit_global_btn(callback: types.CallbackQuery, state: FSMContext):
-    val = callback.data.split("_")[2]
-    if val == "manual":
-        await callback.message.edit_text("Iltimos, yangi umumiy maqsadni raqamda yozing:")
-    else:
-        data = await state.get_data()
-        dhikr_id = data['dhikr_id']
-        daily_tgt = data['daily_target']
-        global_tgt = int(val)
-        
-        supabase.table('dhikrs').update({
-            'daily_target': daily_tgt,
-            'global_target': global_tgt
-        }).eq('id', dhikr_id).execute()
-                
-        await state.clear()
-        keyboard = get_start_action_keyboard()
-        
-        response = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
-        title = response.data[0]['title']
-        
-        await callback.message.edit_text(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
-
-
-@dp.message(StateFilter(EditDhikr.global_target))
-async def process_edit_dhikr_global_msg(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Iltimos, faqat raqam kiriting.")
-        return
-        
-    data = await state.get_data()
-    dhikr_id = data['dhikr_id']
-    daily_tgt = data['daily_target']
-    global_tgt = int(message.text)
-    
-    supabase.table('dhikrs').update({
-        'daily_target': daily_tgt,
-        'global_target': global_tgt
-    }).eq('id', dhikr_id).execute()
-    
-    title_resp = supabase.table('dhikrs').select('title').eq('id', dhikr_id).execute()
-    title = title_resp.data[0]['title']
-            
-    await state.clear()
-    
-    keyboard = get_start_action_keyboard()
-    await message.answer(get_completion_msg(title, daily_tgt, global_tgt), reply_markup=keyboard, parse_mode="HTML")
-
-
 # ==========================================
 # --- Duo'lar tizimi (Pagination) ---
 # ==========================================
@@ -1061,12 +1051,15 @@ def build_dua_card(duas, index, category):
     else:
         buttons.append([InlineKeyboardButton(text="✅ Web-appda ko'rsatish", callback_data=f"dua_on_{category}_{idx}_{dua['id']}")])
     
-    # Tahrirlash va o'chirish
-    action_row = []
-    action_row.append(InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"dua_edit_{category}_{idx}_{dua['id']}"))
-    action_row.append(InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"dua_del_{category}_{idx}_{dua['id']}"))
-    buttons.append(action_row)
-    
+    # Qoidalar va tahrirlash
+    buttons.append([
+        InlineKeyboardButton(text="📋 Qoidalar", callback_data=f"dua_rules_{category}_{idx}"),
+        InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"dua_edit_{category}_{idx}_{dua['id']}")
+    ])
+
+    # O'chirish
+    buttons.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"dua_del_{category}_{idx}_{dua['id']}")])
+
     # Orqaga
     buttons.append([InlineKeyboardButton(text="⬅️ Kategoriyalar", callback_data="view_duas")])
     
@@ -1123,29 +1116,34 @@ async def view_duas_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "send_all_duas")
 async def send_all_duas_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    duas = get_active_duas(user_id)
-    
+    # Barcha kategoriyalardagi faol duolar (kategoriya → id tartibida)
+    duas = [d for d in get_user_duas(user_id) if d.get('is_active', True)]
+
     if not duas:
         await callback.answer("Hozircha faol duolar yo'q.", show_alert=True)
         return
-        
+
     await callback.message.delete()
-    
-    msg = await callback.message.answer("📤 <b>Barcha duolarni yuborish boshlandi...</b>\n\nIltimos kuting.", parse_mode="HTML")
-    
+
+    total = len(duas)
+    msg = await callback.message.answer(
+        f"📤 <b>Barcha duolar yuborilmoqda...</b>\n\n<i>{total} ta duo, iltimos kuting.</i>",
+        parse_mode="HTML"
+    )
+
     for idx, d in enumerate(duas, 1):
-        text = format_dua_message(d, idx, len(duas))
-        await callback.message.answer(text, parse_mode="HTML")
+        cat_name = DUA_CATEGORY_NAMES.get(d.get('category', 'custom'), '📿 Duo')
+        header = f"<b>{idx}/{total}</b> · {cat_name}\n━━━━━━━━━━━━━━━━━━\n\n"
+        await callback.message.answer(header + format_dua_message(d), parse_mode="HTML")
         await asyncio.sleep(0.5)  # Telegram limitiga tushmaslik uchun
-        
-    await msg.edit_text("✅ <b>Barcha duolar yuborildi!</b>\n\nYuqoriga qaytib o'qishingiz mumkin.", parse_mode="HTML")
-    
+
+    await msg.edit_text(
+        "✅ <b>Barcha duolar yuborildi!</b>\n\nYuqoriga qaytib o'qishingiz mumkin.",
+        parse_mode="HTML"
+    )
+
     # Ro'yxatni yana ko'rsatish
     await view_duas_handler(callback)
-
-@dp.callback_query(F.data == "noop")
-async def noop_handler(callback: types.CallbackQuery):
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("dua_page_"))
@@ -1173,6 +1171,23 @@ async def dua_page_handler(callback: types.CallbackQuery):
     
     text, keyboard = build_dua_card(duas, index, category)
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("dua_rules_"))
+async def dua_rules_handler(callback: types.CallbackQuery):
+    """Duo kategoriyasi qoidalari: dua_rules_{category}_{index}"""
+    parts = callback.data.split("_")
+    # dua_rules_pre_prayer_2 → ['dua','rules','pre','prayer','2']
+    category = "_".join(parts[2:-1])
+    index = int(parts[-1])
+
+    await callback.message.edit_text(
+        get_dua_rules(category),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Duoga qaytish", callback_data=f"dua_page_{category}_{index}")]
+        ]),
+        parse_mode="HTML"
+    )
 
 
 # --- Toggle: Faol/Nofaol → kartaga qaytish ---
@@ -1448,7 +1463,7 @@ async def namoz_times_handler(message: types.Message):
     user_data = get_user_full(message.from_user.id)
     city = user_data.get('city', 'Toshkent') if user_data else 'Toshkent'
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     cached = get_cached_prayer_times(city, today)
     
     if cached:
@@ -1478,12 +1493,12 @@ async def namoz_times_handler(message: types.Message):
 # --- Eslatmalar (Scheduler) qismi ---
 # ==========================================
 
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
 
 async def refresh_prayer_cache():
     """Barcha faol shaharlar uchun namoz vaqtlarini yangilash"""
     cities = get_all_active_cities()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     
     logger.info(f"Namoz vaqtlarini yangilash: {len(cities)} ta shahar")
     
@@ -1503,7 +1518,7 @@ async def refresh_prayer_cache():
 
 async def check_prayer_notifications():
     """Har daqiqada namoz eslatmalarini tekshirish"""
-    now = datetime.now()
+    now = now_tashkent()
     current_time = now.strftime("%H:%M")
     today = now.strftime("%Y-%m-%d")
     
@@ -1553,7 +1568,7 @@ async def check_prayer_notifications():
 
 async def check_user_reminders():
     """Har daqiqada shaxsiy eslatmalarni tekshirish"""
-    now = datetime.now()
+    now = now_tashkent()
     current_time_str = now.strftime("%H:%M")
     
     try:
@@ -1578,8 +1593,8 @@ async def check_user_reminders():
 
 
 async def send_morning_dua_broadcast():
-    """Ertalab random tonggi duo yuborish (7:00-8:00 orasida random)"""
-    response = supabase.table('users').select('user_id').execute()
+    """Ertalab random tonggi duo yuborish (eslatmalar yoqilgan foydalanuvchilarga)"""
+    response = supabase.table('users').select('user_id').eq('prayer_notifications', True).execute()
     if not response.data:
         return
     
@@ -1606,8 +1621,8 @@ async def send_morning_dua_broadcast():
 
 
 async def send_evening_dua_broadcast():
-    """Kechqurun random kechki duo yuborish"""
-    response = supabase.table('users').select('user_id').execute()
+    """Kechqurun random kechki duo yuborish (eslatmalar yoqilgan foydalanuvchilarga)"""
+    response = supabase.table('users').select('user_id').eq('prayer_notifications', True).execute()
     if not response.data:
         return
     
@@ -1635,7 +1650,7 @@ async def send_evening_dua_broadcast():
 
 async def send_daily_summary():
     """Kunlik xulosa (22:30 da)"""
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     response = supabase.table('users').select('user_id').execute()
     users = [(u['user_id'],) for u in response.data]
     
@@ -1699,28 +1714,64 @@ async def start_action_handler(callback: types.CallbackQuery):
         return
         
     run_date = None
-    now = datetime.now()
+    now = now_tashkent_aware()
     text = ""
-    
+
     if action == "1h":
         run_date = now + timedelta(hours=1)
         text = "Tushunarli, ishlaringizga baraka! 1 soatdan keyin sizga eslataman. ⏳"
     elif action == "evening":
-        run_date = now.replace(hour=20, minute=0, second=0)
+        run_date = now.replace(hour=20, minute=0, second=0, microsecond=0)
         if run_date <= now:
-            run_date += timedelta(hours=1)
+            run_date += timedelta(days=1)
         text = "Kelishdik! Kechqurun o'zim yodga solaman. 🌙"
     elif action == "bedtime":
         run_date = now + timedelta(hours=1)
         text = "Xo'p bo'ladi, uxlashdan biroz oldin eslatib qo'yaman. 🛏"
     elif action == "morning":
         text = "Juda yaxshi, ertaga tongdan yangi g'ayrat bilan boshlaymiz! 🌅\nXayrli tun."
-        
+
     if run_date:
-        scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, "shaxsiy"])
-        
+        schedule_reminder(user_id, run_date, "shaxsiy")
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Zikrlar ro'yxati", callback_data="view_dhikrs")]])
     await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+def schedule_reminder(user_id, run_dt_aware, kind="shaxsiy"):
+    """Bir martalik eslatmani rejalashtirish.
+
+    Asosiy yo'l — DB (restartda yo'qolmaydi). Agar DB ishlamasa (masalan
+    scheduled_reminders jadvali hali yaratilmagan bo'lsa), xotiradagi
+    scheduler'ga qaytamiz — shunda hech bo'lmaganda regressiya bo'lmaydi.
+    """
+    try:
+        add_scheduled_reminder(user_id, run_dt_aware.isoformat(), kind)
+    except Exception as e:
+        logger.error(f"Eslatma DB'ga saqlanmadi, xotiraga o'tkazildi: {e}")
+        scheduler.add_job(send_specific_reminder, 'date', run_date=run_dt_aware, args=[user_id, kind])
+
+
+async def check_scheduled_reminders():
+    """Har daqiqa: vaqti kelgan bir martalik eslatmalarni yuborish.
+
+    Bot restart bo'lsa ham, DB'da turgan eslatmalar yo'qolmaydi — keyingi
+    ishga tushishda shu tekshiruv ularni topib yuboradi.
+    """
+    try:
+        due = get_due_reminders(now_tashkent_aware().isoformat())
+    except Exception as e:
+        logger.error(f"Kechiktirilgan eslatmalarni olishda xatolik: {e}")
+        return
+
+    for r in due:
+        # Avval 'yuborildi' deb belgilaymiz — takror yuborilmasin
+        try:
+            mark_reminder_sent(r['id'])
+        except Exception as e:
+            logger.error(f"Eslatmani belgilashda xatolik ({r['id']}): {e}")
+            continue
+        await send_specific_reminder(r['user_id'], r.get('kind', 'shaxsiy'))
 
 
 async def send_specific_reminder(user_id, reminder_type):
@@ -1754,8 +1805,8 @@ async def remind_yes_handler(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("remind_later_"))
 async def remind_later_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    run_date = datetime.now() + timedelta(hours=1)
-    scheduler.add_job(send_specific_reminder, 'date', run_date=run_date, args=[user_id, "shaxsiy"])
+    run_date = now_tashkent_aware() + timedelta(hours=1)
+    schedule_reminder(user_id, run_date, "shaxsiy")
     await callback.message.edit_text("Tushunarli, ishlaringizga baraka! 1 soatdan keyin yana eslataman. ⏳")
 
 
@@ -1774,7 +1825,7 @@ async def render_log_dhikr(target, dhikr_id, user_id):
     global_tgt = dhikr['global_target']
     global_prog = dhikr['global_count']
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     prog_resp = supabase.table('daily_progress').select('count').eq('user_id', user_id).eq('dhikr_id', dhikr_id).eq('date', today).execute()
     
     if prog_resp.data:
@@ -1839,7 +1890,7 @@ async def log_add_handler(callback: types.CallbackQuery):
     amount = int(parts[3])
     user_id = callback.from_user.id
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     
     dhikr_resp = supabase.table('dhikrs').select('global_count, daily_target').eq('id', dhikr_id).execute()
     new_global = dhikr_resp.data[0]['global_count'] + amount
@@ -1883,7 +1934,7 @@ async def process_log_custom_amount(message: types.Message, state: FSMContext):
     data = await state.get_data()
     dhikr_id = data['dhikr_id']
     user_id = message.from_user.id
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     
     dhikr_resp = supabase.table('dhikrs').select('global_count').eq('id', dhikr_id).execute()
     new_global = dhikr_resp.data[0]['global_count'] + amount
@@ -1914,7 +1965,7 @@ async def stats_handler(message: types.Message):
     total_users_resp = supabase.table('users').select('user_id', count='exact').execute()
     total_users = total_users_resp.count
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     active_users_resp = supabase.table('daily_progress').select('user_id', count='exact').eq('date', today).execute()
     active_users = active_users_resp.count
     
@@ -2027,7 +2078,7 @@ async def settings_city_select_handler(callback: types.CallbackQuery):
     supabase.table('users').update({'city': city}).eq('user_id', callback.from_user.id).execute()
     
     # Yangi shahar uchun namoz vaqtlarini cache'lash
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     cached = get_cached_prayer_times(city, today)
     if not cached:
         times = await fetch_prayer_times(city)
@@ -2059,7 +2110,7 @@ async def settings_prayer_times_handler(callback: types.CallbackQuery):
     user_data = get_user_full(callback.from_user.id)
     city = user_data.get('city', 'Toshkent') if user_data else 'Toshkent'
     
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_tashkent().strftime("%Y-%m-%d")
     cached = get_cached_prayer_times(city, today)
     
     if cached:
@@ -2141,14 +2192,23 @@ async def main() -> None:
     scheduler.add_job(refresh_prayer_cache, 'cron', hour=0, minute=5, id='refresh_prayer')
     
     # 2. Bot start bo'lganda ham darhol cache'lash
-    scheduler.add_job(refresh_prayer_cache, 'date', run_date=datetime.now() + timedelta(seconds=5), id='refresh_prayer_startup')
+    scheduler.add_job(refresh_prayer_cache, 'date', run_date=now_tashkent() + timedelta(seconds=5), id='refresh_prayer_startup')
     
     # 3. Har daqiqada namoz eslatmalarini tekshirish
     scheduler.add_job(check_prayer_notifications, 'cron', minute='*', id='prayer_notifications')
     
-    # 4. Har daqiqada shaxsiy eslatmalarni tekshirish
+    # 4. Har daqiqada shaxsiy (takroriy) eslatmalarni tekshirish
     scheduler.add_job(check_user_reminders, 'cron', minute='*', id='user_reminders')
-    
+
+    # 4b. Har daqiqada kechiktirilgan (bir martalik) eslatmalarni tekshirish
+    #     — bular DB'da saqlanadi, shuning uchun restartda yo'qolmaydi
+    scheduler.add_job(check_scheduled_reminders, 'cron', minute='*', id='scheduled_reminders')
+
+    # 4c. Bot start bo'lganda darhol tekshirish — bot o'chib turgan vaqtda
+    #     vaqti kelgan eslatmalar 60 soniya kutmay, tezda yuborilsin
+    scheduler.add_job(check_scheduled_reminders, 'date',
+                      run_date=now_tashkent() + timedelta(seconds=8), id='scheduled_reminders_startup')
+
     # 5. Tonggi duo (random vaqtda 6:30-7:30 orasida)
     morning_minute = random.randint(0, 59)
     scheduler.add_job(send_morning_dua_broadcast, 'cron', hour=6, minute=morning_minute, id='morning_dua')
