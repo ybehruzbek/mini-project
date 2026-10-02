@@ -5,7 +5,12 @@ const SUPABASE_URL = 'https://rvrehsjveyvlnpxnmjqh.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2cmVoc2p2ZXl2bG5weG5tanFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MjkwMzgsImV4cCI6MjA5NzEwNTAzOH0.oJne7OxGW_6I1H37YpcOLKQ-_PPRi029VRrBVPlndf8';
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let userId = tg.initDataUnsafe?.user?.id || 1277687464;
+// Faqat Telegram ichida ishlaydi — brauzerda ochilsa hech kimning ma'lumoti ko'rinmasin
+const userId = tg.initDataUnsafe?.user?.id;
+if (!userId) {
+    document.body.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;font-weight:600">Ilovani Telegram bot orqali oching.</div>';
+    throw new Error('Telegram foydalanuvchisi aniqlanmadi');
+}
 let currentDhikr = null;
 let currentCount = 0;
 let currentUser = null;
